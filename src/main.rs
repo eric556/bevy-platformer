@@ -1,11 +1,10 @@
-use bevy::{ecs::storage::TableMoveResult, prelude::*};
-use bevy_canvas::CanvasPlugin;
-use collision::{AABB, CollisionPlugin, DebugCollisionPlugin};
-use kinematic::*;
+use bevy::{ecs::storage::TableMoveResult, input::mouse::MouseMotion, math::Vec4Swizzles, prelude::*};
+use bevy_canvas::{Canvas, CanvasPlugin, DrawMode, common_shapes::{Circle, Line}};
+use kinematic::{colliders::{Collider, DebugCollidersPlugin}, kinematic::{Acceleration, KinematicsPlugin, PHYSICS_UPDATE, Velocity}};
+
+use crate::kinematic::{colliders::{BoxCollider, Ray, check_ray_box_intersection}, kinematic::{KinematicBundle, Position}};
 
 pub mod kinematic;
-pub mod collision;
-
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum GameState {
@@ -19,6 +18,8 @@ enum GameState {
 struct GameResource {
     score: u32
 }
+
+struct MainCamera;
 
 struct PlayerTextureAtlasHandles {
     idle_texture_atlas: Handle<TextureAtlas>
@@ -53,7 +54,7 @@ struct PlayerBundle {
     #[bundle]
     sprite_sheet: SpriteSheetBundle,
     animation_timer: Timer,
-    bounding_box: AABB,
+    bounding_box: Collider,
     input: PlayerInput
 }
 
@@ -125,12 +126,12 @@ fn setup_game(
     commands.insert_resource(PlayerTextureAtlasHandles {
         idle_texture_atlas: idle_texture_handle.clone_weak()
     });
-    commands.spawn_bundle(OrthographicCameraBundle::new_2d());
+    commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera);
 
     commands.spawn_bundle(PlayerBundle{
         health: Health(10u32),
         animation_timer: Timer::from_seconds(0.1, true),
-        bounding_box: AABB { position: Vec2::new(0.0, 0.0), half_size: Vec2::new(32f32, 32f32)},
+        bounding_box: Collider::Box(BoxCollider { position: Vec2::new(0.0, 0.0), half_size: Vec2::new(32f32, 32f32)}),
         sprite_sheet: SpriteSheetBundle {
             texture_atlas: idle_texture_handle.clone(),
             transform: Transform::from_scale(Vec3::splat(4.0)),
@@ -146,16 +147,16 @@ fn setup_game(
         },
         health: Health(10u32),
         animation_timer: Timer::from_seconds(0.1, true),
-        bounding_box: AABB { position: Vec2::new(0.0, 0.0), half_size: Vec2::new(32f32, 32f32)},
+        bounding_box: Collider::Box(BoxCollider { position: Vec2::new(0.0, 0.0), half_size: Vec2::new(32f32, 32f32)}),
         sprite_sheet: SpriteSheetBundle {
             texture_atlas: idle_texture_handle.clone(),
             transform: Transform::from_scale(Vec3::splat(4.0)),
             ..Default::default()
         },
         input: PlayerInput {
-            left: KeyCode::J,
-            right: KeyCode::L,
-            jump: KeyCode::I,
+            left:   KeyCode::J,
+            right:  KeyCode::L,
+            jump:   KeyCode::I,
             crouch: KeyCode::K
         },
         ..Default::default()
@@ -163,19 +164,11 @@ fn setup_game(
 
     let temp = commands.spawn_bundle((
         Position(Vec2::new(0.0, -300.0)), 
-        AABB {
+        Collider::Box(BoxCollider {
             position: Vec2::new(0.0, 0.0),
             half_size: Vec2::new(250.0, 10.0)
-        }
+        })
     )).id();
-
-    println!("Spawned entity {:?}", temp);
-}
-
-fn destruct_game(
-    mut commands: Commands
-) {
-    commands.remove_resource::<GameResource>();
 }
 
 fn main() {
@@ -184,11 +177,10 @@ fn main() {
     .add_startup_system(setup_game.system())
     .add_plugin(bevy_canvas::CanvasPlugin)
     .add_plugin(KinematicsPlugin)
-    .add_plugin(CollisionPlugin)
-    .add_plugin(DebugCollisionPlugin)
+    .add_plugin(DebugCollidersPlugin)
     .add_system(animate_sprite_system.system())
-    .add_system(move_player.system())
-    .add_system(drag.system())
-    // .add_system(gravity.system())
+    .add_system(move_player.system().before(PHYSICS_UPDATE))
+    .add_system(drag.system().before(PHYSICS_UPDATE))
+    // .add_system(gravity.system().before(PHYSICS_UPDATE))
     .run();
 }

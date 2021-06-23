@@ -15,7 +15,7 @@
 
 ## Todo
 - Broad phase of collision detection (Big aabb area that surrounds the start and destenation of the moving object)
-- Consolidate Collision and kinematic. Too intertwined to have them be seperate
+- Move all physics into one system. Fuck this noise
 - Basic analoug jumping
 - Wall jumping
 - Change animations based on player input (state machine for char)
