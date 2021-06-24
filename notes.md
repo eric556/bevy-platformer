@@ -13,6 +13,9 @@
 - Tunneling is an issue, but this can be solved by running the physics at a faster timestep
 
 
+- Project forward a ray in the direction of the target static rect which is expanded by the size of the dynamic rect. 
+- If it finds something reset the velocity with an impulse to set it back to the time before the collision
+
 ## Todo
 - Broad phase of collision detection (Big aabb area that surrounds the start and destenation of the moving object)
 - Move all physics into one system. Fuck this noise

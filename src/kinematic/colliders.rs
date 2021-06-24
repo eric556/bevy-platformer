@@ -122,7 +122,7 @@ pub fn check_ray_box_intersection(ray: &Ray, box_col: &BoxCollider) -> Option<Ra
 
     return Some(RayCollision{
         contact_point: contact_point,
-        contact_normal: contact_normal,
+        contact_normal: contact_normal.normalize_or_zero(),
         t: t_hit_near,
     });
 }
@@ -185,7 +185,7 @@ fn debug_ray(
                 Collider::Box(box_collider) => {
                     if let Some(ray_collision) = check_ray_box_intersection(&Ray::new_from_points(origin, pos_wld.xy()), &box_collider.adjusted_position(&pos.0)) {
                         // println!("Ray collision: {}, {:?}, {:?}", ray_collision.t, ray_collision.contact_point, ray_collision.contact_normal);
-                        if ray_collision.t <= 1.0 {
+                        if ray_collision.t <= 1.0 && ray_collision.t > 0.0 {
                             canvas.draw(&Circle {
                                 center: ray_collision.contact_point,
                                 radius: 5.0
