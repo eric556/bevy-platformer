@@ -32,7 +32,7 @@ struct PlayerInput {
     left: KeyCode,
     right: KeyCode,
     jump: KeyCode,
-    crouch: KeyCode
+    crouch: KeyCode 
 }
 
 impl Default for PlayerInput {
@@ -40,7 +40,7 @@ impl Default for PlayerInput {
         PlayerInput {
             left: KeyCode::A,
             right: KeyCode::D,
-            jump: KeyCode::W,
+            jump: KeyCode::Space,
             crouch: KeyCode::S
         }
     }
@@ -79,7 +79,7 @@ fn gravity(
     mut kinematic_query: Query<&mut Velocity>
 ) {
     for mut vel in kinematic_query.iter_mut() {
-        vel.0.y -= 5.81;
+        vel.0.y -= 9.81;
     }
 }
 
@@ -88,30 +88,22 @@ fn move_player(
     mut player_query: Query<(&PlayerInput, &mut Velocity)>
 ) {
     for (p_input, mut vel) in player_query.iter_mut() {
+        let mut movement = Vec2::ZERO;
+
         if keys.pressed(p_input.left) {
-            vel.0.x -= 2.0;
+            movement.x = -300.0;
+        } else if keys.pressed(p_input.right) {
+            movement.x = 300.0;
         }
-        if keys.pressed(p_input.right) {
-            vel.0.x += 2.0;
-        }
-        if keys.pressed(p_input.crouch) {
-            vel.0.y -= 2.0;
-        }
+
+        vel.0.x = movement.x;
+
         if keys.pressed(p_input.jump) {
-            if vel.0.y < 200.0 {
-                vel.0.y += 50.0;
+            if vel.0.y < 400.0 {
+                vel.0.y += 100.0;
             }
         }
-    }
-}
 
-fn drag(
-    mut accel_query: Query<&mut Velocity>
-) {
-    for mut vel in accel_query.iter_mut() {
-        if vel.0.normalize_or_zero() != Vec2::ZERO {
-            vel.0.x -= 0.5 * vel.0.normalize_or_zero().x;
-        }
     }
 }
 
@@ -185,7 +177,6 @@ fn main() {
     .add_plugin(DebugCollidersPlugin)
     .add_system(animate_sprite_system.system())
     .add_system(move_player.system().before(PHYSICS_UPDATE))
-    .add_system(drag.system().before(PHYSICS_UPDATE))
     .add_system(gravity.system().before(PHYSICS_UPDATE))
     .run();
 }
