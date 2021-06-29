@@ -1,8 +1,8 @@
 use bevy::{ecs::storage::TableMoveResult, input::mouse::MouseMotion, math::Vec4Swizzles, prelude::*};
 use bevy_canvas::{Canvas, CanvasPlugin, DrawMode, common_shapes::{Circle, Line}};
-use kinematic::{colliders::{Collider, DebugCollidersPlugin}, kinematic::{Acceleration, KinematicsPlugin, PHYSICS_UPDATE, Velocity}};
+use kinematic::{PHYSICS_UPDATE, colliders::{Collider, DebugCollidersPlugin}, kinematic::{KinematicsPlugin, Velocity}};
 
-use crate::kinematic::{colliders::{BoxCollider, Ray, check_ray_box_intersection}, kinematic::{KinematicBundle, Position}};
+use crate::kinematic::{colliders::{BoxCollider}, kinematic::{KinematicBundle, Position}};
 
 pub mod kinematic;
 
@@ -76,39 +76,41 @@ fn animate_sprite_system(
 }
 
 fn gravity(
-    mut kinematic_query: Query<&mut Acceleration>
+    mut kinematic_query: Query<&mut Velocity>
 ) {
-    for mut accel in kinematic_query.iter_mut() {
-        accel.0.y -= 9.81;
+    for mut vel in kinematic_query.iter_mut() {
+        vel.0.y -= 5.81;
     }
 }
 
 fn move_player(
     keys: Res<Input<KeyCode>>,
-    mut player_query: Query<(&PlayerInput, &mut Acceleration)>
+    mut player_query: Query<(&PlayerInput, &mut Velocity)>
 ) {
-    for (p_input, mut accel) in player_query.iter_mut() {
+    for (p_input, mut vel) in player_query.iter_mut() {
         if keys.pressed(p_input.left) {
-            accel.0.x -= 2.0;
+            vel.0.x -= 2.0;
         }
         if keys.pressed(p_input.right) {
-            accel.0.x += 2.0;
+            vel.0.x += 2.0;
         }
         if keys.pressed(p_input.crouch) {
-            accel.0.y -= 2.0;
+            vel.0.y -= 2.0;
         }
         if keys.pressed(p_input.jump) {
-            accel.0.y += 2.0;
+            if vel.0.y < 200.0 {
+                vel.0.y += 50.0;
+            }
         }
     }
 }
 
 fn drag(
-    mut accel_query: Query<(&Velocity, &mut Acceleration)>
+    mut accel_query: Query<&mut Velocity>
 ) {
-    for (vel, mut accel) in accel_query.iter_mut() {
+    for mut vel in accel_query.iter_mut() {
         if vel.0.normalize_or_zero() != Vec2::ZERO {
-            accel.0 -= vel.0.normalize_or_zero();
+            vel.0.x -= 0.5 * vel.0.normalize_or_zero().x;
         }
     }
 }
@@ -129,6 +131,9 @@ fn setup_game(
     commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera);
 
     commands.spawn_bundle(PlayerBundle{
+        kbody: KinematicBundle {
+            ..Default::default()
+        },
         health: Health(10u32),
         animation_timer: Timer::from_seconds(0.1, true),
         bounding_box: Collider::Box(BoxCollider { position: Vec2::new(0.0, 0.0), half_size: Vec2::new(32f32, 32f32)}),
@@ -166,7 +171,7 @@ fn setup_game(
         Position(Vec2::new(0.0, -300.0)), 
         Collider::Box(BoxCollider {
             position: Vec2::new(0.0, 0.0),
-            half_size: Vec2::new(250.0, 10.0)
+            half_size: Vec2::new(250.0, 200.0)
         })
     )).id();
 }
@@ -181,6 +186,6 @@ fn main() {
     .add_system(animate_sprite_system.system())
     .add_system(move_player.system().before(PHYSICS_UPDATE))
     .add_system(drag.system().before(PHYSICS_UPDATE))
-    // .add_system(gravity.system().before(PHYSICS_UPDATE))
+    .add_system(gravity.system().before(PHYSICS_UPDATE))
     .run();
 }

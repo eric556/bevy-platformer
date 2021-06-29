@@ -5,7 +5,7 @@ use bevy_canvas::{Canvas, DrawMode, common_shapes::{Circle, Line, Rectangle, Rec
 
 use crate::MainCamera;
 
-use super::kinematic::Position;
+use super::{COLLISION_RESOLUTION, PHYSICS_UPDATE, kinematic::{Position, Velocity}};
 
 // Components
 
@@ -26,7 +26,7 @@ pub struct Ray {
     pub direction: Vec2
 }
 
-pub struct RayCollision {
+pub struct Collision {
     pub contact_point: Vec2,
     pub contact_normal: Vec2,
     pub t: f32
@@ -81,7 +81,7 @@ pub fn check_box_circle_intersection(box_col: &BoxCollider, circle_col: &CircleC
     return (closest - circle_col.position).length() < circle_col.radius;
 }
 
-pub fn check_ray_box_intersection(ray: &Ray, box_col: &BoxCollider) -> Option<RayCollision> {
+pub fn check_ray_box_intersection(ray: &Ray, box_col: &BoxCollider) -> Option<Collision> {
     let invdir = 1.0 / ray.direction;
 
     let mut t_near = (box_col.min() - ray.origin) * invdir;
@@ -120,11 +120,30 @@ pub fn check_ray_box_intersection(ray: &Ray, box_col: &BoxCollider) -> Option<Ra
         Vec2::ZERO
     };
 
-    return Some(RayCollision{
+    return Some(Collision{
         contact_point: contact_point,
         contact_normal: contact_normal.normalize_or_zero(),
         t: t_hit_near,
     });
+}
+
+pub fn check_dynamic_box_box_intersection(dyn_box: &BoxCollider, dyn_box_velocity: &Velocity, target: &BoxCollider, delta_time: f32) -> Option<Collision> {
+    if dyn_box_velocity.0 == Vec2::ZERO {
+        return None;
+    }
+
+    let expanded = BoxCollider {
+        position: target.position,
+        half_size: target.half_size + dyn_box.half_size
+    };
+
+    if let Some(collision) = check_ray_box_intersection(&Ray { origin: dyn_box.position, direction: dyn_box_velocity.0 * delta_time }, &expanded) {
+        if collision.t <= 1.0 {
+            return Some(collision)
+        }
+    }
+
+    return None;
 }
 
 pub enum Collider {
@@ -184,7 +203,7 @@ fn debug_ray(
             match collider {
                 Collider::Box(box_collider) => {
                     if let Some(ray_collision) = check_ray_box_intersection(&Ray::new_from_points(origin, pos_wld.xy()), &box_collider.adjusted_position(&pos.0)) {
-                        // println!("Ray collision: {}, {:?}, {:?}", ray_collision.t, ray_collision.contact_point, ray_collision.contact_normal);
+                        //  println!("Ray collision: {}, {:?}, {:?}", ray_collision.t, ray_collision.contact_point, ray_collision.contact_normal);
                         if ray_collision.t <= 1.0 && ray_collision.t > 0.0 {
                             canvas.draw(&Circle {
                                 center: ray_collision.contact_point,
@@ -203,12 +222,11 @@ fn debug_ray(
 }
 
 // Plugins
-
 pub struct DebugCollidersPlugin;
 
 impl Plugin for DebugCollidersPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app.add_system(debug_aabb.system());
-        app.add_system(debug_ray.system());
+        // app.add_system(debug_ray.system());
     }
 }
