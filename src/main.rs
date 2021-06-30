@@ -1,5 +1,6 @@
 use bevy::{ecs::storage::TableMoveResult, input::mouse::MouseMotion, math::Vec4Swizzles, prelude::*};
 use bevy_canvas::{Canvas, CanvasPlugin, DrawMode, common_shapes::{Circle, Line}};
+use bevy_ecs_tilemap::prelude::*;
 use kinematic::{PHYSICS_UPDATE, colliders::{Collider, DebugCollidersPlugin}, kinematic::{KinematicsPlugin, Velocity}};
 
 use crate::kinematic::{colliders::{BoxCollider}, kinematic::{KinematicBundle, Position}};
@@ -22,7 +23,8 @@ struct GameResource {
 struct MainCamera;
 
 struct PlayerTextureAtlasHandles {
-    idle_texture_atlas: Handle<TextureAtlas>
+    idle_texture_atlas: Handle<TextureAtlas>,
+    run_texture_atlas: Handle<TextureAtlas>
 }
 
 #[derive(Default)]
@@ -46,6 +48,24 @@ impl Default for PlayerInput {
     }
 }
 
+#[derive(PartialEq)]
+enum PlayerState {
+    Idle,
+    Running,
+}
+
+impl Default for PlayerState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+#[derive(Default)]
+pub struct PlayerStats {
+    max_run_speed: f32,
+    speed_up: f32
+}
+
 #[derive(Bundle, Default)]
 struct PlayerBundle {
     health: Health,
@@ -55,7 +75,9 @@ struct PlayerBundle {
     sprite_sheet: SpriteSheetBundle,
     animation_timer: Timer,
     bounding_box: Collider,
-    input: PlayerInput
+    input: PlayerInput,
+    state: PlayerState,
+    player_stats: PlayerStats
 }
 
 fn animate_sprite_system(
@@ -83,27 +105,77 @@ fn gravity(
     }
 }
 
-fn move_player(
-    keys: Res<Input<KeyCode>>,
-    mut player_query: Query<(&PlayerInput, &mut Velocity)>
+fn update_player_animation(
+    player_texture_handles: Res<PlayerTextureAtlasHandles>,
+    texture_atlases: Res<Assets<TextureAtlas>>,
+    mut player_query: Query<(&Velocity, &PlayerState, &mut Timer, &mut TextureAtlasSprite, &mut Handle<TextureAtlas>), Changed<PlayerState>>
 ) {
-    for (p_input, mut vel) in player_query.iter_mut() {
-        let mut movement = Vec2::ZERO;
-
-        if keys.pressed(p_input.left) {
-            movement.x = -300.0;
-        } else if keys.pressed(p_input.right) {
-            movement.x = 300.0;
+    for (vel, state, mut timer, mut sprite, mut current_atlas_handle) in player_query.iter_mut() {
+        match state {
+            PlayerState::Idle => {
+                *current_atlas_handle = player_texture_handles.idle_texture_atlas.clone_weak();
+                *timer = Timer::from_seconds(0.1, true);
+            },
+            PlayerState::Running => {
+                *current_atlas_handle = player_texture_handles.run_texture_atlas.clone_weak();
+                *timer = Timer::from_seconds(0.07, true);
+                if vel.0.x > 0.0 {
+                    sprite.flip_x = false;
+                } else {
+                    sprite.flip_x = true;
+                }
+            },
         }
 
-        vel.0.x = movement.x;
+        if let Some(current_atlas) = texture_atlases.get(current_atlas_handle.clone_weak()) {
+            if sprite.index as usize > current_atlas.len() {
+                sprite.index = 0;
+            }
+        }
+    }
+}
+
+fn move_player(
+    keys: Res<Input<KeyCode>>,
+    mut player_query: Query<(&PlayerInput, &PlayerStats, &mut Velocity, &mut PlayerState)>
+) {
+    for (p_input, player_stats, mut vel, mut state) in player_query.iter_mut() {
+        if keys.pressed(p_input.left) {
+            if vel.0.x > 0.0 { vel.0.x = 0.0; }
+            vel.0.x -= player_stats.speed_up;
+            vel.0.x = vel.0.x.max(-player_stats.max_run_speed);
+        }
+
+        if keys.pressed(p_input.right) {
+            if vel.0.x < 0.0 {
+                vel.0.x = 0.0;
+            }
+            vel.0.x += player_stats.speed_up;
+            vel.0.x = vel.0.x.min(player_stats.max_run_speed);
+        }
+
+        if !keys.pressed(p_input.left) && !keys.pressed(p_input.right) {
+            vel.0.x = 0.0;
+        }
+
+        match *state {
+            PlayerState::Idle => {
+                if vel.0.x != 0.0 {
+                    *state = PlayerState::Running;
+                }
+            },
+            PlayerState::Running => {
+                if vel.0.x == 0.0 {
+                    *state = PlayerState::Idle;
+                }
+            },
+        }
 
         if keys.pressed(p_input.jump) {
             if vel.0.y < 400.0 {
                 vel.0.y += 100.0;
             }
         }
-
     }
 }
 
@@ -116,10 +188,26 @@ fn setup_game(
     let idle_texture_atlas = TextureAtlas::from_grid(idle_texture_sheet_handle, Vec2::new(16.0, 16.0), 4, 1);
     let idle_texture_handle = texture_atlases.add(idle_texture_atlas);
 
+    let run_texture_sheet_handle = asset_server.load("herochar_run_anim_strip_6.png");
+    let run_texture_atlas = TextureAtlas::from_grid(run_texture_sheet_handle, Vec2::new(16.0, 16.0), 6, 1);
+    let run_texture_handle = texture_atlases.add(run_texture_atlas);
+
+    let texture_handles = PlayerTextureAtlasHandles {
+        idle_texture_atlas: idle_texture_handle.clone(),
+        run_texture_atlas: run_texture_handle.clone()
+    };
+
+    // let map_handle: Handle<TiledMap> = asset_server.load("test_map.tmx");
+    // let map_entity = commands.spawn().id();
+    // commands.entity(map_entity)
+    //     .insert_bundle(TiledMapBundle {
+    //         tiled_map: map_handle,
+    //         map: Map::new(0u16, map_entity),
+    //         transform:  Transform::from_scale(Vec3::splat(4.0)),
+    //         ..Default::default()
+    //     });
+
     commands.insert_resource(GameResource{ score: 0u32 });
-    commands.insert_resource(PlayerTextureAtlasHandles {
-        idle_texture_atlas: idle_texture_handle.clone_weak()
-    });
     commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera);
 
     commands.spawn_bundle(PlayerBundle{
@@ -129,8 +217,12 @@ fn setup_game(
         health: Health(10u32),
         animation_timer: Timer::from_seconds(0.1, true),
         bounding_box: Collider::Box(BoxCollider { position: Vec2::new(0.0, 0.0), half_size: Vec2::new(32f32, 32f32)}),
+        player_stats: PlayerStats {
+            max_run_speed: 500.0,
+            speed_up: 100.0,
+        },
         sprite_sheet: SpriteSheetBundle {
-            texture_atlas: idle_texture_handle.clone(),
+            texture_atlas: texture_handles.idle_texture_atlas.clone_weak(),
             transform: Transform::from_scale(Vec3::splat(4.0)),
             ..Default::default()
         },
@@ -163,9 +255,11 @@ fn setup_game(
         Position(Vec2::new(0.0, -300.0)), 
         Collider::Box(BoxCollider {
             position: Vec2::new(0.0, 0.0),
-            half_size: Vec2::new(250.0, 200.0)
+            half_size: Vec2::new(500.0, 100.0)
         })
     )).id();
+
+    commands.insert_resource(texture_handles);
 }
 
 fn main() {
@@ -175,8 +269,11 @@ fn main() {
     .add_plugin(bevy_canvas::CanvasPlugin)
     .add_plugin(KinematicsPlugin)
     .add_plugin(DebugCollidersPlugin)
+    .add_plugin(TilemapPlugin)
+    .add_plugin(TiledMapPlugin)
     .add_system(animate_sprite_system.system())
     .add_system(move_player.system().before(PHYSICS_UPDATE))
     .add_system(gravity.system().before(PHYSICS_UPDATE))
+    .add_system(update_player_animation.system().after(PHYSICS_UPDATE))
     .run();
 }

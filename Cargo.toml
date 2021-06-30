@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 bevy = "0.5"
 bevy_canvas = "0.1"
+bevy_ecs_tilemap = { git = "https://github.com/StarArawn/bevy_ecs_tilemap", features = ["tiled_map"]}
