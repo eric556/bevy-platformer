@@ -119,7 +119,7 @@ fn update_player_animation(
             PlayerState::Running => {
                 *current_atlas_handle = player_texture_handles.run_texture_atlas.clone_weak();
                 *timer = Timer::from_seconds(0.07, true);
-                if vel.0.x > 0.0 {
+                if vel.0.x.signum() > 0.0 {
                     sprite.flip_x = false;
                 } else {
                     sprite.flip_x = true;
@@ -140,23 +140,23 @@ fn move_player(
     mut player_query: Query<(&PlayerInput, &PlayerStats, &mut Velocity, &mut PlayerState)>
 ) {
     for (p_input, player_stats, mut vel, mut state) in player_query.iter_mut() {
-        if keys.pressed(p_input.left) {
-            if vel.0.x > 0.0 { vel.0.x = 0.0; }
+        let prev_vel_sign = vel.0.x.signum();
+
+        
+
+        
+        if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right)) || (keys.pressed(p_input.left) && keys.pressed(p_input.right)) {
+            vel.0.x = 0.0;
+        } else if keys.pressed(p_input.left) {
+            if prev_vel_sign > 0.0 { vel.0.x = 0.0; }
             vel.0.x -= player_stats.speed_up;
             vel.0.x = vel.0.x.max(-player_stats.max_run_speed);
-        }
-
-        if keys.pressed(p_input.right) {
-            if vel.0.x < 0.0 {
-                vel.0.x = 0.0;
-            }
+        } else if keys.pressed(p_input.right) {
+            if prev_vel_sign < 0.0 { vel.0.x = 0.0; }
             vel.0.x += player_stats.speed_up;
             vel.0.x = vel.0.x.min(player_stats.max_run_speed);
         }
 
-        if !keys.pressed(p_input.left) && !keys.pressed(p_input.right) {
-            vel.0.x = 0.0;
-        }
 
         match *state {
             PlayerState::Idle => {
@@ -167,6 +167,11 @@ fn move_player(
             PlayerState::Running => {
                 if vel.0.x == 0.0 {
                     *state = PlayerState::Idle;
+                }
+
+                // reset the running animation
+                if vel.0.x.signum() != prev_vel_sign {
+                    *state = PlayerState::Running;
                 }
             },
         }
