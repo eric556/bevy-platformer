@@ -2,7 +2,8 @@ use bevy::{
     math::Vec3Swizzles,
     prelude::*,
 };
-use bevy_rapier2d::{physics::{ColliderBundle, ColliderPositionSync, NoUserData, RapierConfiguration, RapierPhysicsPlugin, RigidBodyBundle, RigidBodyPositionSync}, prelude::{ColliderMassProps, ColliderMaterial, ColliderShape, ColliderType, MassProperties, RigidBodyDamping, RigidBodyForces, RigidBodyMassPropsFlags, RigidBodyPosition, RigidBodyType, RigidBodyVelocity}, render::{ColliderDebugRender, RapierRenderPlugin}};
+use bevy_canvas::{Canvas, DrawMode, common_shapes::{self, Circle, Rectangle}};
+use bevy_rapier2d::{physics::{ColliderBundle, ColliderPositionSync, NoUserData, RapierConfiguration, RapierPhysicsPlugin, RigidBodyBundle}, prelude::{ColliderPosition, ColliderShape, ColliderType, RigidBodyForces, RigidBodyMassPropsFlags, RigidBodyVelocity}, render::{ColliderDebugRender}};
 use fastapprox::fast::ln;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -232,6 +233,29 @@ fn move_camera(
     }
 }
 
+fn debug_colliders(
+    mut canvas: ResMut<Canvas>,
+    rapier_params: Res<RapierConfiguration>,
+    collider_shapes: Query<(&ColliderPosition, &ColliderShape)>
+) {
+    for (col_pos, col_shape) in collider_shapes.iter() {
+        if let Some(ball) = col_shape.as_ball() {
+            canvas.draw(&Circle {
+                center: Vec2::from(col_pos.0.translation) * rapier_params.scale,
+                radius: ball.radius * rapier_params.scale,
+            }, DrawMode::stroke_1px(), Color::RED);
+        }
+
+        if let Some(cuboid) = col_shape.as_cuboid() {
+            canvas.draw(&Rectangle {
+                origin: Vec2::from(col_pos.0.translation) * rapier_params.scale,
+                extents: Vec2::from(cuboid.half_extents) * rapier_params.scale * 2.0,
+                anchor_point: common_shapes::RectangleAnchor::Center,
+            }, DrawMode::stroke_1px(), Color::RED);
+        }
+    }
+}
+
 fn setup_game(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -368,17 +392,6 @@ fn setup_game(
         .insert(ColliderPositionSync::Discrete)        
         .insert(ColliderDebugRender::with_id(1));
 
-
-    // let temp = commands
-    //     .spawn_bundle((
-    //         Position(Vec2::new(0.0, -300.0)),
-    //         Collider::Box(BoxCollider {
-    //             position: Vec2::new(0.0, 0.0),
-    //             half_size: Vec2::new(500.0, 100.0),
-    //         }),
-    //     ))
-    //     .id();
-
     commands.spawn_bundle(ColliderBundle {
         collider_type: ColliderType::Solid,
         shape: ColliderShape::cuboid(100.0, 0.1),
@@ -392,7 +405,7 @@ fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup_game.system())
-        // .add_plugin(bevy_canvas::CanvasPlugin)
+        .add_plugin(bevy_canvas::CanvasPlugin)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         // .add_plugin(RapierRenderPlugin)
         // .add_system(debug_rigidbody.system())
@@ -400,5 +413,6 @@ fn main() {
         .add_system(move_player.system())
         .add_system(update_player_animation.system())
         .add_system(move_camera.system())
+        .add_system(debug_colliders.system())
         .run();
 }
