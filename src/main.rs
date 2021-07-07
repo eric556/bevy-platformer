@@ -107,14 +107,7 @@ fn animate_sprite_system(
 fn update_player_animation(
     player_texture_handles: Res<PlayerTextureAtlasHandles>,
     texture_atlases: Res<Assets<TextureAtlas>>,
-    mut player_query: Query<
-        (
-            &RigidBodyVelocity,
-            &PlayerState,
-            &mut Timer,
-            &mut TextureAtlasSprite,
-            &mut Handle<TextureAtlas>,
-        ),
+    mut player_query: Query<(&RigidBodyVelocity, &PlayerState, &mut Timer, &mut TextureAtlasSprite, &mut Handle<TextureAtlas>),
         Changed<PlayerState>,
     >,
 ) {
