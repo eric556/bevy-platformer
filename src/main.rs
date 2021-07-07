@@ -1,7 +1,9 @@
-use bevy::{ecs::storage::TableMoveResult, input::mouse::MouseMotion, math::Vec4Swizzles, prelude::*};
+use bevy::{ecs::storage::TableMoveResult, input::mouse::MouseMotion, math::{Vec3Swizzles, Vec4Swizzles}, prelude::*, render::camera::Camera};
 use bevy_canvas::{Canvas, CanvasPlugin, DrawMode, common_shapes::{Circle, Line}};
+use bevy_easings::{Ease, EaseFunction, EasingsPlugin};
 use bevy_ecs_tilemap::prelude::*;
 use kinematic::{PHYSICS_UPDATE, colliders::{Collider, DebugCollidersPlugin}, kinematic::{KinematicsPlugin, Velocity}};
+use fastapprox::fast::{self, exp, ln, sigmoid};
 
 use crate::kinematic::{colliders::{BoxCollider}, kinematic::{KinematicBundle, Position}};
 
@@ -21,10 +23,12 @@ struct GameResource {
 }
 
 struct MainCamera;
+struct CameraTarget;
 
 struct PlayerTextureAtlasHandles {
     idle_texture_atlas: Handle<TextureAtlas>,
-    run_texture_atlas: Handle<TextureAtlas>
+    run_texture_atlas: Handle<TextureAtlas>,
+    pre_jump_texture_atlaas: Handle<TextureAtlas>,
 }
 
 #[derive(Default)]
@@ -52,6 +56,8 @@ impl Default for PlayerInput {
 enum PlayerState {
     Idle,
     Running,
+    Jumping,
+    Falling
 }
 
 impl Default for PlayerState {
@@ -125,6 +131,7 @@ fn update_player_animation(
                     sprite.flip_x = true;
                 }
             },
+            _ => todo!("Implement rest of player state animations")
         }
 
         if let Some(current_atlas) = texture_atlases.get(current_atlas_handle.clone_weak()) {
@@ -142,9 +149,6 @@ fn move_player(
     for (p_input, player_stats, mut vel, mut state) in player_query.iter_mut() {
         let prev_vel_sign = vel.0.x.signum();
 
-        
-
-        
         if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right)) || (keys.pressed(p_input.left) && keys.pressed(p_input.right)) {
             vel.0.x = 0.0;
         } else if keys.pressed(p_input.left) {
@@ -156,7 +160,6 @@ fn move_player(
             vel.0.x += player_stats.speed_up;
             vel.0.x = vel.0.x.min(player_stats.max_run_speed);
         }
-
 
         match *state {
             PlayerState::Idle => {
@@ -174,6 +177,7 @@ fn move_player(
                     *state = PlayerState::Running;
                 }
             },
+            _ => todo!("Implement rest of player state")
         }
 
         if keys.pressed(p_input.jump) {
@@ -184,22 +188,84 @@ fn move_player(
     }
 }
 
+fn move_camera (
+    target_query: Query<&Transform, With<CameraTarget>>,
+    mut camera_query: Query<&mut Transform, (With<MainCamera>, Without<CameraTarget>)>
+) {
+    let mut centorid = Vec2::ZERO;
+    let mut n = 0.0;
+    for transform in target_query.iter() {
+        centorid += transform.translation.xy();
+        n += 1.0;
+    }
+    centorid /= n;
+
+    for mut transform in camera_query.iter_mut() {
+        let distance = centorid.distance(transform.translation.xy());
+        let z = transform.translation.z;
+
+        // let k = 1.5f32;
+        // let b = -0.02f32;
+        // let a = -0.1f32;
+        // let c = -0.8f32;
+        // let mut t = (k / (1.0f32 + exp(a+(distance * b)))) + c;
+
+        let g = 0.0004f32;
+        let l = -1.0f32;
+        let t = ln(g * distance - l);
+
+        // if t < 0.01 {
+        //     println!("Not moving {}", t.clamp(0.0, 1.0));
+        //     transform.translation = Vec3::new(centorid.x, centorid.y, z);
+        // } else {
+            println!("{}", t.clamp(0.0, 1.0));
+            let new_position  = transform.translation.xy().lerp(centorid, t.clamp(0.0, 1.0));
+            transform.translation = Vec3::new(new_position.x, new_position.y, z);
+        // }
+
+
+    }
+}
+
+fn load_animation(
+    asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+    texture_path: &str,    
+    tile_size: Vec2,
+    columns: usize,
+    rows: usize
+) -> Handle<TextureAtlas> {
+    let texture_sheet_handle = asset_server.load(texture_path);
+    let texture_atlas = TextureAtlas::from_grid(texture_sheet_handle, tile_size, columns, rows);
+    let texture_handle = texture_atlases.add(texture_atlas);
+    return texture_handle.clone();
+}
+
 fn setup_game(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>
 ) {
-    let idle_texture_sheet_handle = asset_server.load("herochar_idle_anim_strip_4.png");
-    let idle_texture_atlas = TextureAtlas::from_grid(idle_texture_sheet_handle, Vec2::new(16.0, 16.0), 4, 1);
-    let idle_texture_handle = texture_atlases.add(idle_texture_atlas);
-
-    let run_texture_sheet_handle = asset_server.load("herochar_run_anim_strip_6.png");
-    let run_texture_atlas = TextureAtlas::from_grid(run_texture_sheet_handle, Vec2::new(16.0, 16.0), 6, 1);
-    let run_texture_handle = texture_atlases.add(run_texture_atlas);
 
     let texture_handles = PlayerTextureAtlasHandles {
-        idle_texture_atlas: idle_texture_handle.clone(),
-        run_texture_atlas: run_texture_handle.clone()
+        idle_texture_atlas: load_animation(
+            asset_server, 
+            texture_atlases, 
+            "herochar_idle_anim_strip_4.png", 
+            Vec2::new(16.0, 16.0), 4, 1
+        ),
+        run_texture_atlas: load_animation(
+            asset_server, 
+            texture_atlases, 
+            "herochar_run_anim_strip_6.png", 
+            Vec2::new(16.0, 16.0), 6, 1
+        ),
+        pre_jump_texture_atlaas: load_animation(
+            asset_server, 
+            texture_atlases, 
+            "herochar_before_or_after_jump_srip_2.png", 
+            Vec2::new(16.0, 16.0), 2, 1
+        ),
     };
 
     // let map_handle: Handle<TiledMap> = asset_server.load("test_map.tmx");
@@ -232,7 +298,7 @@ fn setup_game(
             ..Default::default()
         },
         ..Default::default()
-    });
+    }).insert(CameraTarget);
 
     commands.spawn_bundle(PlayerBundle{
         kbody: KinematicBundle {
@@ -243,9 +309,13 @@ fn setup_game(
         animation_timer: Timer::from_seconds(0.1, true),
         bounding_box: Collider::Box(BoxCollider { position: Vec2::new(0.0, 0.0), half_size: Vec2::new(32f32, 32f32)}),
         sprite_sheet: SpriteSheetBundle {
-            texture_atlas: idle_texture_handle.clone(),
+            texture_atlas: texture_handles.idle_texture_atlas.clone_weak(),
             transform: Transform::from_scale(Vec3::splat(4.0)),
             ..Default::default()
+        },
+        player_stats: PlayerStats {
+            max_run_speed: 500.0,
+            speed_up: 100.0,
         },
         input: PlayerInput {
             left:   KeyCode::J,
@@ -254,7 +324,7 @@ fn setup_game(
             crouch: KeyCode::K
         },
         ..Default::default()
-    });
+    }).insert(CameraTarget);
 
     let temp = commands.spawn_bundle((
         Position(Vec2::new(0.0, -300.0)), 
@@ -276,9 +346,11 @@ fn main() {
     .add_plugin(DebugCollidersPlugin)
     .add_plugin(TilemapPlugin)
     .add_plugin(TiledMapPlugin)
+    .add_plugin(EasingsPlugin)
     .add_system(animate_sprite_system.system())
     .add_system(move_player.system().before(PHYSICS_UPDATE))
     .add_system(gravity.system().before(PHYSICS_UPDATE))
     .add_system(update_player_animation.system().after(PHYSICS_UPDATE))
+    .add_system(move_camera.system())
     .run();
 }
