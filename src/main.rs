@@ -3,16 +3,10 @@ use bevy_canvas::{
     common_shapes::{self, Circle, Rectangle},
     Canvas, DrawMode,
 };
-use bevy_rapier2d::{
-    physics::{
+use bevy_rapier2d::{physics::{
         ColliderBundle, ColliderPositionSync, NoUserData, RapierConfiguration, RapierPhysicsPlugin,
         RigidBodyBundle,
-    },
-    prelude::{
-        ColliderFlags, ColliderPosition, ColliderShape, ColliderType, InteractionGroups,
-        RigidBodyForces, RigidBodyMassPropsFlags, RigidBodyVelocity,
-    },
-};
+    }, prelude::{ColliderFlags, ColliderPosition, ColliderShape, ColliderType, InteractionGroups, RigidBodyForces, RigidBodyMassPropsFlags, RigidBodyType, RigidBodyVelocity}};
 use fastapprox::fast::ln;
 use player::PlayerPlugin;
 
@@ -203,6 +197,7 @@ fn setup_game(
     commands
         .spawn_bundle(PlayerBundle {
             rigid_body: RigidBodyBundle {
+                body_type: RigidBodyType::Dynamic,
                 forces: RigidBodyForces {
                     gravity_scale: 5.0,
                     ..Default::default()
@@ -239,6 +234,39 @@ fn setup_game(
     commands.spawn_bundle(ColliderBundle {
         collider_type: ColliderType::Solid,
         shape: ColliderShape::cuboid(40.0, 0.5),
+        flags: ColliderFlags {
+            collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    commands.spawn_bundle(ColliderBundle {
+        collider_type: ColliderType::Solid,
+        shape: ColliderShape::cuboid(1.0, 1.0),
+        position: [-1.0, 1.5].into(),
+        flags: ColliderFlags {
+            collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    commands.spawn_bundle(ColliderBundle {
+        collider_type: ColliderType::Solid,
+        shape: ColliderShape::cuboid(1.0, 0.5),
+        position: [-4.0, 4.5].into(),
+        flags: ColliderFlags {
+            collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    commands.spawn_bundle(ColliderBundle {
+        collider_type: ColliderType::Solid,
+        shape: ColliderShape::cuboid(1.0, 1.0),
+        position: [-7.0, 1.5].into(),
         flags: ColliderFlags {
             collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
             ..Default::default()

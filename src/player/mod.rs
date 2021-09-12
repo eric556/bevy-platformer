@@ -210,7 +210,7 @@ fn update_player_grounded(
             collider_position.y - (bounds_half_extents.y),
         ]
         .into();
-        let shape_vel = Vec2::new(0.0, -0.1).into();
+        let shape_vel = Vec2::new(0.0, -0.01).into();
         let max_toi = 4.0;
         let groups = InteractionGroups::new(SHAPE_CAST_GROUP, GROUND_GROUP);
         let filter = None;
@@ -280,10 +280,10 @@ fn move_player(
         }
 
         if keys.pressed(p_input.jump) && state.grounded {
-            // if vel.linvel.y < 10.0 {
-            //     vel.linvel.y += 1.0;
-            // }
-            vel.apply_impulse(mass, Vec2::new(0.0, 5.0).into());
+            if vel.linvel.y < 40.0 {
+                vel.linvel.y += 5.0;
+            }
+            // vel.apply_impulse(mass, Vec2::new(0.0, 10.0).into());
         }
     }
 }
