@@ -1,3 +1,4 @@
+use animation::{AnimationPlugin, Col, Row, SpriteSheetDefinition};
 use bevy::{math::Vec3Swizzles, prelude::*};
 use bevy_canvas::{
     common_shapes::{self, Circle, Rectangle},
@@ -10,9 +11,10 @@ use bevy_rapier2d::{physics::{
 use fastapprox::fast::ln;
 use player::PlayerPlugin;
 
-use crate::player::{Health, PlayerBundle, PlayerStats, PlayerTextureAtlasHandles};
+use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, player::{Health, PlayerBundle, PlayerStats}};
 
 pub mod player;
+pub mod animation;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum GameState {
@@ -33,24 +35,6 @@ struct CameraTarget;
 pub static GROUND_GROUP: u32 = 0b0001;
 pub static ENTITY_GROUP: u32 = 0b0010;
 pub static SHAPE_CAST_GROUP: u32 = 0b0100;
-
-fn animate_sprite_system(
-    time: Res<Time>,
-    texture_atlases: Res<Assets<TextureAtlas>>,
-    mut query: Query<(&mut Timer, &mut TextureAtlasSprite, &Handle<TextureAtlas>)>,
-) {
-    for (mut timer, mut sprite, texture_atlas_handle) in query.iter_mut() {
-        timer.tick(time.delta());
-        if timer.finished() {
-            let texture_atlas_option = texture_atlases.get(texture_atlas_handle);
-            if texture_atlas_option.is_some() {
-                sprite.index = ((sprite.index as usize + 1)
-                    % texture_atlas_option.unwrap().textures.len())
-                    as u32;
-            }
-        }
-    }
-}
 
 fn sprite_flip(mut sprite_query: Query<(&RigidBodyVelocity, &mut TextureAtlasSprite)>) {
     for (vel, mut sprite) in sprite_query.iter_mut() {
@@ -136,39 +120,21 @@ fn setup_game(
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut rapier_config: ResMut<RapierConfiguration>,
 ) {
-    let idle_texture_sheet_handle = asset_server.load("herochar_idle_anim_strip_4.png");
-    let idle_texture_atlas =
-        TextureAtlas::from_grid(idle_texture_sheet_handle, Vec2::new(16.0, 16.0), 4, 1);
-    let idle_texture_atlas_handle = texture_atlases.add(idle_texture_atlas);
+    let hero_char_texture_sheet_handle = asset_server.load("herochar_spritesheet.png");
+    let hero_char_atlas = TextureAtlas::from_grid(hero_char_texture_sheet_handle, Vec2::new(16.0, 16.0), 8, 15);
+    let hero_char_texture_atalas_handle = texture_atlases.add(hero_char_atlas);
 
-    let run_texture_sheet_handle = asset_server.load("herochar_run_anim_strip_6.png");
-    let run_texture_atlas =
-        TextureAtlas::from_grid(run_texture_sheet_handle, Vec2::new(16.0, 16.0), 6, 1);
-    let run_texture_atlas_handle = texture_atlases.add(run_texture_atlas);
-
-    let pre_jump_texture_sheet_handle =
-        asset_server.load("herochar_before_or_after_jump_srip_2.png");
-    let pre_jump_texture_atlaas =
-        TextureAtlas::from_grid(pre_jump_texture_sheet_handle, Vec2::new(16.0, 16.0), 2, 1);
-    let pre_jump_texture_atlas_handle = texture_atlases.add(pre_jump_texture_atlaas);
-
-    let jump_up_texture_sheet_handle = asset_server.load("herochar_jump_up_anim_strip_3.png");
-    let jump_up_texture_atlaas =
-        TextureAtlas::from_grid(jump_up_texture_sheet_handle, Vec2::new(16.0, 16.0), 3, 1);
-    let jump_up_texture_atlas_handle = texture_atlases.add(jump_up_texture_atlaas);
-
-    let jump_down_texture_sheet_handle = asset_server.load("herochar_jump_down_anim_strip_3.png");
-    let jump_down_texture_atlaas =
-        TextureAtlas::from_grid(jump_down_texture_sheet_handle, Vec2::new(16.0, 16.0), 3, 1);
-    let jump_down_texture_atlas_handle = texture_atlases.add(jump_down_texture_atlaas);
-
-    let texture_handles = PlayerTextureAtlasHandles {
-        idle_texture_atlas: idle_texture_atlas_handle.clone(),
-        run_texture_atlas: run_texture_atlas_handle.clone(),
-        pre_jump_texture_atlaas: pre_jump_texture_atlas_handle.clone(),
-        jump_up_texture_atlas: jump_up_texture_atlas_handle.clone(),
-        jump_down_texture_atlas: jump_down_texture_atlas_handle.clone(),
-    };
+    let hero_char_animation_definitions: Vec<AnimationDefinition> = vec![
+        AnimationDefinition { name: String::from("death"), number_of_frames: 8, frame_time: 0.0, repeating: true },
+        AnimationDefinition { name: String::from("run"), number_of_frames: 6, frame_time: 0.07, repeating: true },
+        AnimationDefinition { name: String::from("pushing"), number_of_frames: 6, frame_time: 0.1, repeating: true },
+        AnimationDefinition { name: String::from("attack_no_slash"), number_of_frames: 4, frame_time: 0.1, repeating: false },
+        // ? What should we do about long boy animations (multiframe)
+        AnimationDefinition { name: String::from("attack_slash"), number_of_frames: 8, frame_time: 0.1, repeating: false },
+        AnimationDefinition { name: String::from("idle"), number_of_frames: 4, frame_time: 0.1, repeating: true },
+        AnimationDefinition { name: String::from("falling"), number_of_frames: 3, frame_time: 0.07, repeating: true },
+        AnimationDefinition { name: String::from("jumping"), number_of_frames: 3, frame_time: 0.07, repeating: true },
+    ];
 
     // let map_handle: Handle<TiledMap> = asset_server.load("test_map.tmx");
     // let map_entity = commands.spawn().id();
@@ -216,15 +182,20 @@ fn setup_game(
                 ..Default::default()
             },
             health: Health(10u32),
-            animation_timer: Timer::from_seconds(0.1, true),
             player_stats: PlayerStats {
                 max_run_speed: 20.0,
                 speed_up: 5.0,
             },
-            sprite_sheet: SpriteSheetBundle {
-                texture_atlas: texture_handles.idle_texture_atlas.clone_weak(),
-                transform: Transform::from_scale(Vec3::splat(sprite_scale)),
-                ..Default::default()
+            animation: AnimatedSpriteBundle {
+                sprite_sheet: SpriteSheetBundle {
+                    texture_atlas: hero_char_texture_atalas_handle,
+                    transform: Transform::from_scale(Vec3::splat(sprite_scale)),
+                    ..Default::default()
+                },                
+                sprite_sheet_definitions: SpriteSheetDefinition { animation_definitions: hero_char_animation_definitions, rows: 15, columns: 8 },
+                animation_timer: Timer::from_seconds(0.1, true),
+                current_row: Row(5), // Set it up as the idle animation right away
+                current_col: Col(0)
             },
             ..Default::default()
         })
@@ -273,8 +244,6 @@ fn setup_game(
         },
         ..Default::default()
     });
-
-    commands.insert_resource(texture_handles);
 }
 
 fn main() {
@@ -283,8 +252,8 @@ fn main() {
         .add_startup_system(setup_game.system())
         .add_plugin(bevy_canvas::CanvasPlugin)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
-        .add_system(animate_sprite_system.system())
         .add_system(move_camera.system())
         .add_system(debug_colliders.system())
         .add_system(sprite_flip.system())

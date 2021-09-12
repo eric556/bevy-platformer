@@ -14,14 +14,7 @@ use bevy_rapier2d::{
     },
 };
 
-use crate::{GROUND_GROUP, SHAPE_CAST_GROUP};
-pub struct PlayerTextureAtlasHandles {
-    pub idle_texture_atlas: Handle<TextureAtlas>,
-    pub run_texture_atlas: Handle<TextureAtlas>,
-    pub pre_jump_texture_atlaas: Handle<TextureAtlas>,
-    pub jump_up_texture_atlas: Handle<TextureAtlas>,
-    pub jump_down_texture_atlas: Handle<TextureAtlas>,
-}
+use crate::{GROUND_GROUP, SHAPE_CAST_GROUP, animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}};
 
 #[derive(Default)]
 pub struct Health(pub u32);
@@ -77,54 +70,41 @@ pub struct PlayerBundle {
     #[bundle]
     pub collider: ColliderBundle,
     #[bundle]
-    pub sprite_sheet: SpriteSheetBundle,
-    pub animation_timer: Timer,
+    pub animation: AnimatedSpriteBundle,
     pub input: PlayerInput,
     pub state: PlayerState,
     pub action: PlayerAction,
     pub player_stats: PlayerStats,
 }
 
-fn update_player_texture_atlas(
-    player_texture_handles: Res<PlayerTextureAtlasHandles>,
-    texture_atlases: Res<Assets<TextureAtlas>>,
+fn update_player_animation(
     mut player_query: Query<
         (
             &PlayerAction,
+            &SpriteSheetDefinition,
             &mut Timer,
-            &mut TextureAtlasSprite,
-            &mut Handle<TextureAtlas>,
+            &mut Row,
+            &mut Col
         ),
         Changed<PlayerAction>,
     >,
 ) {
-    for (player_action, mut timer, mut sprite, mut current_atlas_handle) in player_query.iter_mut()
+    for (player_action, sprite_sheet_def, mut timer, mut row, mut col) in player_query.iter_mut()
     {
-        match player_action {
-            PlayerAction::Idle => {
-                *current_atlas_handle = player_texture_handles.idle_texture_atlas.clone_weak();
-                *timer = Timer::from_seconds(0.1, true);
-            }
-            PlayerAction::Running => {
-                *current_atlas_handle = player_texture_handles.run_texture_atlas.clone_weak();
-                *timer = Timer::from_seconds(0.07, true);
-            }
-            PlayerAction::Falling => {
-                *current_atlas_handle = player_texture_handles.jump_down_texture_atlas.clone_weak();
-                *timer = Timer::from_seconds(0.07, true);
-            }
-            PlayerAction::Jumping => {
-                *current_atlas_handle = player_texture_handles.jump_up_texture_atlas.clone_weak();
-                *timer = Timer::from_seconds(0.07, true);
-            }
+        row.0 = match player_action {
+            PlayerAction::Idle => 5,
+            PlayerAction::Running => 1,
+            PlayerAction::Falling => 6,
+            PlayerAction::Jumping => 7,
             _ => todo!("Implement rest of player state animations"),
-        }
+        };
 
-        if let Some(current_atlas) = texture_atlases.get(current_atlas_handle.clone_weak()) {
-            if sprite.index as usize > current_atlas.len() {
-                sprite.index = 0;
-            }
-        }
+        // reset the timer
+        let def = &sprite_sheet_def.animation_definitions[row.0];
+        *timer = Timer::from_seconds(def.frame_time, def.repeating);
+
+        // reset to begining of animation
+        col.0 = 0;
     }
 }
 
@@ -293,7 +273,7 @@ pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app.add_system(move_player.system())
-            .add_system(update_player_texture_atlas.system())
+            .add_system(update_player_animation.system())
             .add_system(update_player_grounded.system())
             .add_system(update_player_action.system());
     }
