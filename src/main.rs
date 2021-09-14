@@ -114,6 +114,24 @@ fn debug_colliders(
     }
 }
 
+fn kinematic_gravity_system(
+    rapier_params: Res<RapierConfiguration>,
+    time: Res<Time>,
+    mut rigidbody_query: Query<(
+        &RigidBodyType,
+        &mut RigidBodyVelocity
+    )>
+) {
+    for (body_type, mut vel) in rigidbody_query.iter_mut() {
+        match body_type {
+            RigidBodyType::KinematicVelocityBased => {
+                vel.linvel.y += rapier_params.gravity.y;
+            },
+            _ => {}
+        }
+    }
+}
+
 fn setup_game(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -163,7 +181,7 @@ fn setup_game(
     commands
         .spawn_bundle(PlayerBundle {
             rigid_body: RigidBodyBundle {
-                body_type: RigidBodyType::Dynamic,
+                body_type: RigidBodyType::KinematicVelocityBased,
                 forces: RigidBodyForces {
                     gravity_scale: 5.0,
                     ..Default::default()
@@ -183,8 +201,12 @@ fn setup_game(
             },
             health: Health(10u32),
             player_stats: PlayerStats {
-                max_run_speed: 20.0,
-                speed_up: 5.0,
+                max_run_speed: 200.0,
+                speed_up: 10.0,
+                time_to_apex: 10.0,
+                min_jump_height: 20.0,
+                max_jump_height: 80.0,
+                ..Default::default()
             },
             animation: AnimatedSpriteBundle {
                 sprite_sheet: SpriteSheetBundle {
@@ -192,7 +214,11 @@ fn setup_game(
                     transform: Transform::from_scale(Vec3::splat(sprite_scale)),
                     ..Default::default()
                 },                
-                sprite_sheet_definitions: SpriteSheetDefinition { animation_definitions: hero_char_animation_definitions, rows: 15, columns: 8 },
+                sprite_sheet_definitions: SpriteSheetDefinition { 
+                    animation_definitions: hero_char_animation_definitions, 
+                    rows: 15, 
+                    columns: 8 
+                },
                 animation_timer: Timer::from_seconds(0.1, true),
                 current_row: Row(5), // Set it up as the idle animation right away
                 current_col: Col(0)
@@ -226,7 +252,7 @@ fn setup_game(
     commands.spawn_bundle(ColliderBundle {
         collider_type: ColliderType::Solid,
         shape: ColliderShape::cuboid(1.0, 0.5),
-        position: [-4.0, 4.5].into(),
+        position: [-4.0, 5.5].into(),
         flags: ColliderFlags {
             collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
             ..Default::default()
@@ -254,6 +280,7 @@ fn main() {
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
+        // .add_system(kinematic_gravity_system.system())
         .add_system(move_camera.system())
         .add_system(debug_colliders.system())
         .add_system(sprite_flip.system())
