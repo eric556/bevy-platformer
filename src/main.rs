@@ -4,14 +4,11 @@ use bevy_canvas::{
     common_shapes::{self, Circle, Rectangle},
     Canvas, DrawMode,
 };
-use bevy_rapier2d::{physics::{
-        ColliderBundle, ColliderPositionSync, NoUserData, RapierConfiguration, RapierPhysicsPlugin,
-        RigidBodyBundle,
-    }, prelude::{ColliderFlags, ColliderPosition, ColliderShape, ColliderType, InteractionGroups, RigidBodyForces, RigidBodyMassPropsFlags, RigidBodyType, RigidBodyVelocity}};
+use heron::prelude::*;
 use fastapprox::fast::ln;
-use player::PlayerPlugin;
 
-use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, player::{Health, PlayerBundle, PlayerStats}};
+use player::PlayerPlugin;
+use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, player::{Health, PlayerBundle, PlayerInput, PlayerStats}};
 
 pub mod player;
 pub mod animation;
@@ -36,11 +33,18 @@ pub static GROUND_GROUP: u32 = 0b0001;
 pub static ENTITY_GROUP: u32 = 0b0010;
 pub static SHAPE_CAST_GROUP: u32 = 0b0100;
 
-fn sprite_flip(mut sprite_query: Query<(&RigidBodyVelocity, &mut TextureAtlasSprite)>) {
+#[derive(PhysicsLayer)]
+enum Layer {
+    World,
+    Player,
+    Enemies,
+}
+
+fn sprite_flip(mut sprite_query: Query<(&Velocity, &mut TextureAtlasSprite)>) {
     for (vel, mut sprite) in sprite_query.iter_mut() {
-        if vel.linvel.x < 0.0 {
+        if vel.linear.x < 0.0 {
             sprite.flip_x = true;
-        } else if vel.linvel.x > 0.0 {
+        } else if vel.linear.x > 0.0 {
             sprite.flip_x = false;
         }
     }
@@ -83,42 +87,21 @@ fn move_camera(
     }
 }
 
-fn debug_colliders(
-    mut canvas: ResMut<Canvas>,
-    rapier_params: Res<RapierConfiguration>,
-    collider_shapes: Query<(&ColliderPosition, &ColliderShape)>,
+fn update_position(
+    grav: Res<Gravity>,
+    mut query: Query<(&mut Velocity, &mut Transform)>
 ) {
-    for (col_pos, col_shape) in collider_shapes.iter() {
-        if let Some(ball) = col_shape.as_ball() {
-            canvas.draw(
-                &Circle {
-                    center: Vec2::from(col_pos.0.translation) * rapier_params.scale,
-                    radius: ball.radius * rapier_params.scale,
-                },
-                DrawMode::stroke_1px(),
-                Color::RED,
-            );
-        }
-
-        if let Some(cuboid) = col_shape.as_cuboid() {
-            canvas.draw(
-                &Rectangle {
-                    origin: Vec2::from(col_pos.0.translation) * rapier_params.scale,
-                    extents: Vec2::from(cuboid.half_extents) * rapier_params.scale * 2.0,
-                    anchor_point: common_shapes::RectangleAnchor::Center,
-                },
-                DrawMode::stroke_1px(),
-                Color::RED,
-            );
-        }
+    for (mut vel, mut trans) in query.iter_mut() {
+        // println!("Vel: {:?}, transform: {:?}", vel, trans);
+        // trans.translation += vel.linear;
     }
 }
 
 fn setup_game(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
-    mut rapier_config: ResMut<RapierConfiguration>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>
 ) {
     let hero_char_texture_sheet_handle = asset_server.load("herochar_spritesheet.png");
     let hero_char_atlas = TextureAtlas::from_grid(hero_char_texture_sheet_handle, Vec2::new(16.0, 16.0), 8, 15);
@@ -154,38 +137,21 @@ fn setup_game(
     let sprite_size_x = 16.0;
     let sprite_size_y = 16.0;
     let sprite_scale = 4.0;
-    rapier_config.scale = 8.0 * sprite_scale;
-    let collider_size_x = (sprite_size_x * sprite_scale) / rapier_config.scale;
-    let collider_size_y = (sprite_size_y * sprite_scale) / rapier_config.scale;
+    let collider_size_x = sprite_size_x * sprite_scale;
+    let collider_size_y = sprite_size_y * sprite_scale;
 
-    println!("Collider size: {}, {}", collider_size_x, collider_size_y);
+    // println!("Collider size: {}, {}", collider_size_x, collider_size_y);
 
     commands
-        .spawn_bundle(PlayerBundle {
-            rigid_body: RigidBodyBundle {
-                body_type: RigidBodyType::Dynamic,
-                forces: RigidBodyForces {
-                    gravity_scale: 5.0,
-                    ..Default::default()
-                },
-                position: Vec2::new(20.0, 10.0).into(),
-                mass_properties: (RigidBodyMassPropsFlags::ROTATION_LOCKED).into(),
-                ..Default::default()
+        .spawn_bundle(PlayerBundle{
+            rigid_body_type: RigidBody::KinematicVelocityBased,
+            velocity: Velocity::from_linear(Vec3::ZERO),
+            collision_shape: CollisionShape::Cuboid {
+                half_extends: Vec3::new(collider_size_x / 2.0, collider_size_y / 2.0, 0.0),
+                border_radius: None
             },
-            collider: ColliderBundle {
-                shape: ColliderShape::cuboid(collider_size_x / 2.0, collider_size_y / 2.0),
-                flags: ColliderFlags {
-                    collision_groups: InteractionGroups::new(ENTITY_GROUP, GROUND_GROUP),
-                    ..Default::default()
-                },
-                position: [collider_size_x / 2.0, collider_size_y / 2.0].into(),
-                ..Default::default()
-            },
+            collision_layers: CollisionLayers::none().with_group(Layer::Player).with_mask(Layer::World),
             health: Health(10u32),
-            player_stats: PlayerStats {
-                max_run_speed: 20.0,
-                speed_up: 5.0,
-            },
             animation: AnimatedSpriteBundle {
                 sprite_sheet: SpriteSheetBundle {
                     texture_atlas: hero_char_texture_atalas_handle,
@@ -197,65 +163,92 @@ fn setup_game(
                 current_row: Row(5), // Set it up as the idle animation right away
                 current_col: Col(0)
             },
+            player_stats: PlayerStats {
+                max_run_speed: 50000.0,
+                speed_up: 100.0,
+            },
             ..Default::default()
         })
-        .insert(CameraTarget)
-        .insert(ColliderPositionSync::Discrete);
+        // .insert(RotationConstraints::lock())
+        .insert(CameraTarget);
 
-    commands.spawn_bundle(ColliderBundle {
-        collider_type: ColliderType::Solid,
-        shape: ColliderShape::cuboid(40.0, 0.5),
-        flags: ColliderFlags {
-            collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-            ..Default::default()
-        },
+    let size = Vec2::new(400.0, 10.0);
+    commands
+    // Spawn a bundle that contains at least a `GlobalTransform`
+    .spawn_bundle(SpriteBundle {
+        sprite: Sprite::new(size),
+        material: materials.add(Color::WHITE.into()),
+        transform: Transform::from_translation(Vec3::new(0.0, -300.0, 0.0)),
+        ..Default::default()
+    })
+    // Make it a rigid body
+    .insert(RigidBody::KinematicVelocityBased)
+    // Attach a collision shape
+    .insert(CollisionShape::Cuboid {
+        half_extends: size.extend(0.0) / 2.0,
+        border_radius: None,
+    })
+    // Define restitution (so that it bounces)
+    .insert(PhysicMaterial {
+        restitution: 0.5,
         ..Default::default()
     });
+    // commands.spawn_bundle(ColliderBundle {
+    //     collider_type: ColliderType::Solid,
+    //     shape: ColliderShape::cuboid(40.0, 0.5),
+    //     flags: ColliderFlags {
+    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
+    //         ..Default::default()
+    //     },
+    //     ..Default::default()
+    // });
 
-    commands.spawn_bundle(ColliderBundle {
-        collider_type: ColliderType::Solid,
-        shape: ColliderShape::cuboid(1.0, 1.0),
-        position: [-1.0, 1.5].into(),
-        flags: ColliderFlags {
-            collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+    // commands.spawn_bundle(ColliderBundle {
+    //     collider_type: ColliderType::Solid,
+    //     shape: ColliderShape::cuboid(1.0, 1.0),
+    //     position: [-1.0, 1.5].into(),
+    //     flags: ColliderFlags {
+    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
+    //         ..Default::default()
+    //     },
+    //     ..Default::default()
+    // });
 
-    commands.spawn_bundle(ColliderBundle {
-        collider_type: ColliderType::Solid,
-        shape: ColliderShape::cuboid(1.0, 0.5),
-        position: [-4.0, 4.5].into(),
-        flags: ColliderFlags {
-            collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+    // commands.spawn_bundle(ColliderBundle {
+    //     collider_type: ColliderType::Solid,
+    //     shape: ColliderShape::cuboid(1.0, 0.5),
+    //     position: [-4.0, 4.5].into(),
+    //     flags: ColliderFlags {
+    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
+    //         ..Default::default()
+    //     },
+    //     ..Default::default()
+    // });
 
-    commands.spawn_bundle(ColliderBundle {
-        collider_type: ColliderType::Solid,
-        shape: ColliderShape::cuboid(1.0, 1.0),
-        position: [-7.0, 1.5].into(),
-        flags: ColliderFlags {
-            collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-            ..Default::default()
-        },
-        ..Default::default()
-    });
+    // commands.spawn_bundle(ColliderBundle {
+    //     collider_type: ColliderType::Solid,
+    //     shape: ColliderShape::cuboid(1.0, 1.0),
+    //     position: [-7.0, 1.5].into(),
+    //     flags: ColliderFlags {
+    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
+    //         ..Default::default()
+    //     },
+    //     ..Default::default()
+    // });
 }
 
 fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
-        .add_startup_system(setup_game.system())
         .add_plugin(bevy_canvas::CanvasPlugin)
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
+        .add_plugin(PhysicsPlugin::default())
+        .insert_resource(Gravity::from(Vec3::new(0.0, -9.81, 0.0)))
         .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
-        .add_system(move_camera.system())
-        .add_system(debug_colliders.system())
-        .add_system(sprite_flip.system())
+        .add_startup_system(setup_game.system())
+        // .add_system(move_camera.system())
+        .add_system(update_position.system())
+        // .add_system(debug_colliders.system())
+        // .add_system(sprite_flip.system())
         .run();
 }

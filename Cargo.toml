@@ -9,6 +9,5 @@ edition = "2018"
 [dependencies]
 bevy = "0.5"
 bevy_canvas = "0.1"
-bevy_ecs_tilemap = { git = "https://github.com/StarArawn/bevy_ecs_tilemap", features = ["tiled_map"]}
 fastapprox = "0.3.0"
-bevy_rapier2d = { version = "0.10.2", features = [ "simd-stable", "render" ] }
+heron = { path="../heron", features = ["2d", "debug-2d"] }
