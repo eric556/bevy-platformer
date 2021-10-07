@@ -15,6 +15,34 @@ use bevy_rapier2d::{
 };
 
 use crate::{GROUND_GROUP, SHAPE_CAST_GROUP, animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}};
+use macros::animation_graph;
+
+animation_graph!(
+    Player,
+    {vel: bevy_rapier2d::rapier::dynamics::RigidBodyVelocity},
+    Jump {
+		Fall -> vel.linvel.y < 0.0
+	},
+	Fall {
+		Idle -> vel.linvel.y == 0.0
+	},
+	Idle {
+		Jump -> vel.linvel.y != 0.0 && vel.linvel.y > 0.0,
+		Fall -> vel.linvel.y != 0.0 && vel.linvel.y < 0.0,
+		Run ->  vel.linvel.x != 0.0
+	},
+	Run {
+		Jump -> vel.linvel.y != 0.0 && vel.linvel.y > 0.0,
+		Fall -> vel.linvel.y != 0.0 && vel.linvel.y < 0.0,
+		Idle -> vel.linvel.x == 0.0
+	}
+);
+
+impl Default for Player::PlayerAnimationUpdate {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
 
 #[derive(Default)]
 pub struct Health(pub u32);
@@ -34,20 +62,6 @@ impl Default for PlayerInput {
             jump: KeyCode::Space,
             crouch: KeyCode::S,
         }
-    }
-}
-
-#[derive(PartialEq, Debug)]
-pub enum PlayerAction {
-    Idle,
-    Running,
-    Jumping,
-    Falling,
-}
-
-impl Default for PlayerAction {
-    fn default() -> Self {
-        Self::Idle
     }
 }
 
@@ -73,29 +87,29 @@ pub struct PlayerBundle {
     pub animation: AnimatedSpriteBundle,
     pub input: PlayerInput,
     pub state: PlayerState,
-    pub action: PlayerAction,
+    pub action: Player::PlayerAnimationUpdate,
     pub player_stats: PlayerStats,
 }
 
 fn update_player_animation(
     mut player_query: Query<
         (
-            &PlayerAction,
+            &Player::PlayerAnimationUpdate,
             &SpriteSheetDefinition,
             &mut Timer,
             &mut Row,
             &mut Col
         ),
-        Changed<PlayerAction>,
+        Changed<Player::PlayerAnimationUpdate>,
     >,
 ) {
     for (player_action, sprite_sheet_def, mut timer, mut row, mut col) in player_query.iter_mut()
     {
         row.0 = match player_action {
-            PlayerAction::Idle => 5,
-            PlayerAction::Running => 1,
-            PlayerAction::Falling => 6,
-            PlayerAction::Jumping => 7,
+            Player::PlayerAnimationUpdate::Idle => 5,
+            Player::PlayerAnimationUpdate::Run => 1,
+            Player::PlayerAnimationUpdate::Fall => 6,
+            Player::PlayerAnimationUpdate::Jump => 7,
             _ => todo!("Implement rest of player state animations"),
         };
 
@@ -105,61 +119,6 @@ fn update_player_animation(
 
         // reset to begining of animation
         col.0 = 0;
-    }
-}
-
-fn update_player_action(mut player_query: Query<(&RigidBodyVelocity, &mut PlayerAction)>) {
-    for (vel, mut player_action) in player_query.iter_mut() {
-        match *player_action {
-            PlayerAction::Idle => {
-                if vel.linvel.y != 0.0 {
-                    if vel.linvel.y.signum() > 0.0 {
-                        *player_action = PlayerAction::Jumping;
-                    } else if vel.linvel.y.signum() < 0.0 {
-                        *player_action = PlayerAction::Falling;
-                    }
-                }
-
-                if vel.linvel.x != 0.0 {
-                    *player_action = PlayerAction::Running;
-                }
-            }
-            PlayerAction::Running => {
-                if vel.linvel.y != 0.0 {
-                    if vel.linvel.y.signum() > 0.0 {
-                        *player_action = PlayerAction::Jumping;
-                    } else if vel.linvel.y.signum() < 0.0 {
-                        *player_action = PlayerAction::Falling;
-                    }
-                }
-
-                if vel.linvel.x == 0.0 {
-                    *player_action = PlayerAction::Idle;
-                }
-            }
-            PlayerAction::Jumping => {
-                if vel.linvel.y == 0.0 {
-                    if vel.linvel.x != 0.0 {
-                        *player_action = PlayerAction::Running;
-                    } else {
-                        *player_action = PlayerAction::Idle;
-                    }
-                } else if vel.linvel.y.signum() < 0.0 {
-                    *player_action = PlayerAction::Falling;
-                }
-            }
-            PlayerAction::Falling => {
-                if vel.linvel.y == 0.0 {
-                    if vel.linvel.x != 0.0 {
-                        *player_action = PlayerAction::Running;
-                    } else {
-                        *player_action = PlayerAction::Idle;
-                    }
-                } else if vel.linvel.y.signum() > 0.0 {
-                    *player_action = PlayerAction::Jumping;
-                }
-            }
-        }
     }
 }
 
@@ -229,14 +188,11 @@ fn move_player(
     mut player_query: Query<(
         &PlayerInput,
         &PlayerStats,
-        &mut RigidBodyVelocity,
-        &mut RigidBodyForces,
-        &RigidBodyMassProps,
-        &mut PlayerAction,
         &PlayerState,
+        &mut RigidBodyVelocity
     )>,
 ) {
-    for (p_input, player_stats, mut vel, mut forces, mass, mut player_action, state) in
+    for (p_input, player_stats, state, mut vel) in
         player_query.iter_mut()
     {
         let prev_vel_sign = vel.linvel.x.signum();
@@ -275,6 +231,7 @@ impl Plugin for PlayerPlugin {
         app.add_system(move_player.system())
             .add_system(update_player_animation.system())
             .add_system(update_player_grounded.system())
-            .add_system(update_player_action.system());
+            // .add_system(update_player_action.system());
+            .add_system(Player::player_animation_update.system());
     }
 }
