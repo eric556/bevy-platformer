@@ -1,6 +1,6 @@
 use bevy::{core::{Time, Timer}, prelude::{AppBuilder, Bundle, IntoSystem, Plugin, Query, Res, SpriteSheetBundle}, sprite::TextureAtlasSprite};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct AnimationDefinition {
     pub name: String,
     pub number_of_frames: usize,
