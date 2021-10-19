@@ -7,18 +7,17 @@ use bevy_canvas::{
     common_shapes::{self, Circle, Rectangle},
     Canvas, DrawMode,
 };
-use bevy_rapier2d::{physics::{
-        ColliderBundle, ColliderPositionSync, NoUserData, RapierConfiguration, RapierPhysicsPlugin,
-        RigidBodyBundle,
-    }, prelude::{ColliderFlags, ColliderPosition, ColliderShape, ColliderType, InteractionGroups, RigidBodyForces, RigidBodyMassPropsFlags, RigidBodyType, RigidBodyVelocity}};
+
 use fastapprox::fast::ln;
 use ldtk_rust::{EntityInstance, Project, TileInstance};
+use physics::{DebugAABBPlugin, PhysicsPlugin, body::Velocity};
 use player::PlayerPlugin;
 
-use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, player::{Health, PlayerBundle, PlayerStats}};
+use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, physics::{body::{BodyBundle, BodyType, Position}, collision::AABB}};
 
 pub mod player;
 pub mod animation;
+pub mod physics;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum GameState {
@@ -74,10 +73,6 @@ impl ExtraEntDefs {
 struct MainCamera;
 struct CameraTarget;
 
-pub static GROUND_GROUP: u32 = 0b0001;
-pub static ENTITY_GROUP: u32 = 0b0010;
-pub static SHAPE_CAST_GROUP: u32 = 0b0100;
-
 // LDtk provides pixel locations starting in the top left. For Bevy we need to
 // flip the Y axis and offset from the center of the screen.
 fn convert_to_world(
@@ -109,12 +104,35 @@ fn flip(x: bool, y: bool) -> Quat {
     q1 * q2
 }
 
-fn sprite_flip(mut sprite_query: Query<(&RigidBodyVelocity, &mut TextureAtlasSprite)>) {
-    for (vel, mut sprite) in sprite_query.iter_mut() {
-        if vel.linvel.x < 0.0 {
-            sprite.flip_x = true;
-        } else if vel.linvel.x > 0.0 {
-            sprite.flip_x = false;
+// fn sprite_flip(mut sprite_query: Query<(&RigidBodyVelocity, &mut TextureAtlasSprite)>) {
+//     for (vel, mut sprite) in sprite_query.iter_mut() {
+//         if vel.linvel.x < 0.0 {
+//             sprite.flip_x = true;
+//         } else if vel.linvel.x > 0.0 {
+//             sprite.flip_x = false;
+//         }
+//     }
+// }
+
+fn gravity(
+    keys: Res<Input<KeyCode>>,
+    mut actor_query: Query<(&mut Velocity, &BodyType)> 
+) {
+    for (mut vel, body_type) in actor_query.iter_mut() {
+        if *body_type == BodyType::Actor {
+            if keys.pressed(KeyCode::A) {
+                vel.0.x -= 2.0;
+            }
+            if keys.pressed(KeyCode::D) {
+                vel.0.x += 2.0;
+            }
+            if keys.pressed(KeyCode::S) {
+                vel.0.y -= 2.0;
+            }
+            if keys.pressed(KeyCode::W) {
+                vel.0.y += 2.0;
+            }
+            // vel.0.y -= 9.81;
         }
     }
 }
@@ -151,39 +169,8 @@ fn move_camera(
         // } else {
         // println!("{}", t.clamp(0.0, 1.0));
         let new_position = transform.translation.xy().lerp(centorid, t.clamp(0.0, 1.0));
-        transform.translation = Vec3::new(new_position.x, new_position.y, z);
+        // transform.translation = Vec3::new(new_position.x, new_position.y, z);
         // }
-    }
-}
-
-fn debug_colliders(
-    mut canvas: ResMut<Canvas>,
-    rapier_params: Res<RapierConfiguration>,
-    collider_shapes: Query<(&ColliderPosition, &ColliderShape)>,
-) {
-    for (col_pos, col_shape) in collider_shapes.iter() {
-        if let Some(ball) = col_shape.as_ball() {
-            canvas.draw(
-                &Circle {
-                    center: Vec2::from(col_pos.0.translation) * rapier_params.scale,
-                    radius: ball.radius * rapier_params.scale,
-                },
-                DrawMode::stroke_1px(),
-                Color::RED,
-            );
-        }
-
-        if let Some(cuboid) = col_shape.as_cuboid() {
-            canvas.draw(
-                &Rectangle {
-                    origin: Vec2::from(col_pos.0.translation) * rapier_params.scale,
-                    extents: Vec2::from(cuboid.half_extents) * rapier_params.scale * 2.0,
-                    anchor_point: common_shapes::RectangleAnchor::Center,
-                },
-                DrawMode::stroke_1px(),
-                Color::RED,
-            );
-        }
     }
 }
 
@@ -195,7 +182,8 @@ fn setup_tilemap(
 
     // Load up the map
     let map = Map {
-        ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
+        // ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
+        ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
         redraw: true,
         current_level: 0,
     };
@@ -218,15 +206,6 @@ fn setup_tilemap(
     // Slap these bad boys into resources
     commands.insert_resource(map);
     commands.insert_resource(map_assets);
-}
-
-fn setup_game(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
-    mut rapier_config: ResMut<RapierConfiguration>,
-) {
-
 }
 
 // Spawn a tile. Check to see if it needs to flip on the x and/or y axis before spawning.
@@ -256,7 +235,7 @@ fn display_tile(
                 layer_info.grid_cell_size,
                 4.0,
                 (tile.px[0] as f32 + level_world_pos.x) as i32,
-                (tile.px[1] as f32+ level_world_pos.y) as i32,
+                (tile.px[1] as f32 + level_world_pos.y) as i32,
                 layer_info.z_index,
             ),
             rotation: flip(flip_x, flip_y),
@@ -287,7 +266,6 @@ fn update_ldtk_map(
     map_assets: Res<LdtkMapAssets>,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
-    mut rapier_config: ResMut<RapierConfiguration>,
 ) {
     if !map.redraw {
         return
@@ -317,11 +295,11 @@ fn update_ldtk_map(
     let sprite_size_x = 16.0;
     let sprite_size_y = 16.0;
     let sprite_scale = 4.0;
-    rapier_config.scale = 8.0 * sprite_scale;
-    let collider_size_x = (sprite_size_x * sprite_scale) / rapier_config.scale;
-    let collider_size_y = (sprite_size_y * sprite_scale) / rapier_config.scale;
+    // rapier_config.scale = 8.0 * sprite_scale;
+    // let collider_size_x = (sprite_size_x * sprite_scale) / rapier_config.scale;
+    // let collider_size_y = (sprite_size_y * sprite_scale) / rapier_config.scale;
 
-    println!("Collider size: {}, {}", collider_size_x, collider_size_y);
+    // println!("Collider size: {}, {}", collider_size_x, collider_size_y);
 
     commands.insert_resource(ClearColor(
         Color::hex(&map.ldtk_file.levels[0].bg_color[1..]).unwrap(),
@@ -346,7 +324,18 @@ fn update_ldtk_map(
     
             match &layer.layer_instance_type[..] {
                 "Tiles" => {
-    
+                    if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
+                        println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
+                        for tile in layer.grid_tiles.iter() {
+                            display_tile(
+                                layer_info,
+                                tile,
+                                level_ldtk_world_pos,
+                                &mut commands,
+                                map_assets.0[&(layer_tileset_def_uid as i32)].clone()
+                            )
+                        } 
+                    }
                 }
                 "AutoLayer" => {
     
@@ -376,21 +365,15 @@ fn update_ldtk_map(
                                     Vec2::new(layer_info.px_width, layer_info.px_height), 
                                     4.0
                                 );
-    
-                                let rapier_half_extents = bevy_half_extent / rapier_config.scale;
-                                let rapier_position = bevy_pos / rapier_config.scale;
-    
-                                println!("Creating collider Size({:?}) Position({:?})", rapier_half_extents, rapier_position);
-    
-                                commands.spawn_bundle(ColliderBundle {
-                                    collider_type: ColliderType::Solid,
-                                    shape: ColliderShape::cuboid(rapier_half_extents.x, rapier_half_extents.y),
-                                    position: rapier_position.into(),
-                                    flags: ColliderFlags {
-                                        collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-                                        ..Default::default()
-                                    },
+
+                                println!("Creating collider Size({:?}) Position({:?})", bevy_half_extent, bevy_pos);
+
+                                commands.spawn_bundle(BodyBundle {
+                                    position: Position(bevy_pos),
                                     ..Default::default()
+                                }).insert(AABB {
+                                    position: IVec2::ZERO,
+                                    half_size: IVec2::new(bevy_half_extent.x.round() as i32, bevy_half_extent.y.round() as i32),
                                 });
                             }
                         }
@@ -405,62 +388,22 @@ fn update_ldtk_map(
                                     4.0
                                 );
     
-                                // have to undo the half extent because the origin is at the center
-                                bevy_pos = bevy_pos - bevy_half_extent;
-                                let rapier_half_extents = bevy_half_extent / rapier_config.scale;
-                                let rapier_position = bevy_pos / rapier_config.scale;
-    
                                 println!("Spawning at position: {:?} {:?}", bevy_pos, bevy_half_extent);
     
                                 match &entity.identifier[..] {
                                     "Player" => {
-                                        commands
-                                        .spawn_bundle(PlayerBundle {
-                                            rigid_body: RigidBodyBundle {
-                                                body_type: RigidBodyType::Dynamic,
-                                                forces: RigidBodyForces {
-                                                    gravity_scale: 5.0,
-                                                    ..Default::default()
-                                                },
-                                                position: rapier_position.into(),
-                                                mass_properties: (RigidBodyMassPropsFlags::ROTATION_LOCKED).into(),
-                                                ..Default::default()
-                                            },
-                                            collider: ColliderBundle {
-                                                shape: ColliderShape::cuboid(rapier_half_extents.x, rapier_half_extents.y),
-                                                flags: ColliderFlags {
-                                                    collision_groups: InteractionGroups::new(ENTITY_GROUP, GROUND_GROUP),
-                                                    ..Default::default()
-                                                },
-                                                position: rapier_half_extents.into(),
-                                                ..Default::default()
-                                            },
-                                            health: Health(10u32),
-                                            player_stats: PlayerStats {
-                                                max_run_speed: 20.0,
-                                                speed_up: 5.0,
-                                            },
-                                            animation: AnimatedSpriteBundle {
-                                                sprite_sheet: SpriteSheetBundle {
-                                                    texture_atlas: hero_char_texture_atalas_handle.clone(),
-                                                    transform: Transform::from_scale(Vec3::splat(sprite_scale)),
-                                                    ..Default::default()
-                                                },                
-                                                sprite_sheet_definitions: SpriteSheetDefinition { animation_definitions: hero_char_animation_definitions.clone(), rows: 15, columns: 8 },
-                                                animation_timer: Timer::from_seconds(0.1, true),
-                                                current_row: Row(5), // Set it up as the idle animation right away
-                                                current_col: Col(0)
-                                            },
+                                        commands.spawn_bundle(BodyBundle {
+                                            body_type: BodyType::Actor,
+                                            position: Position(bevy_pos),
                                             ..Default::default()
-                                        })
-                                        .insert(CameraTarget)
-                                        .insert(ColliderPositionSync::Discrete);
+                                        }).insert(AABB {
+                                            position: IVec2::ZERO,
+                                            half_size: IVec2::new(bevy_half_extent.x.round() as i32, bevy_half_extent.y.round() as i32),
+                                        }).insert(CameraTarget);
                                     }
                                     _ => {}
                                 }
-    
                             }
-    
                         }
                         _ => {}
                     }
@@ -478,15 +421,17 @@ fn update_ldtk_map(
 fn main() {
     App::build()
         .add_plugins(DefaultPlugins)
-        .add_startup_system(setup_game.system())
+        // .add_startup_system(setup_game.system())
         .add_startup_system(setup_tilemap.system())
         .add_plugin(bevy_canvas::CanvasPlugin)
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
+        .add_plugin(PhysicsPlugin)
+        .add_plugin(DebugAABBPlugin)
         .add_system(update_ldtk_map.system())
         .add_system(move_camera.system())
-        .add_system(debug_colliders.system())
-        .add_system(sprite_flip.system())
+        .add_system(gravity.system().before("MOVE_ACTORS"))
+        // .add_system(debug_colliders.system())
+        // .add_system(sprite_flip.system())
         .run();
 }
