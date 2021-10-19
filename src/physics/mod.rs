@@ -93,7 +93,6 @@ fn move_actor(
 
             
             // println!("End Pos({:?})", position);
-            velocity.0 = Vec2::ZERO;
         }
 
     }

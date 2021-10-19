@@ -157,7 +157,7 @@ fn move_camera(
         // } else {
         // println!("{}", t.clamp(0.0, 1.0));
         let new_position = transform.translation.xy().lerp(centorid, t.clamp(0.0, 1.0));
-        // transform.translation = Vec3::new(new_position.x, new_position.y, z);
+        transform.translation = Vec3::new(new_position.x, new_position.y, z);
         // }
     }
 }
@@ -170,8 +170,8 @@ fn setup_tilemap(
 
     // Load up the map
     let map = Map {
-        // ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
-        ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
+        ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
+        // ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
         redraw: true,
         current_level: 0,
     };
@@ -380,15 +380,6 @@ fn update_ldtk_map(
     
                                 match &entity.identifier[..] {
                                     "Player" => {
-                                        // commands.spawn_bundle(BodyBundle {
-                                        //     body_type: BodyType::Actor,
-                                        //     position: Position(bevy_pos),
-                                        //     ..Default::default()
-                                        // }).insert(AABB {
-                                        //     position: IVec2::ZERO,
-                                        //     half_size: IVec2::new(bevy_half_extent.x.round() as i32, bevy_half_extent.y.round() as i32),
-                                        // }).insert(CameraTarget);
-
                                             commands.spawn_bundle(PlayerBundle {
                                                 health: Health(10u32),
                                                 body_bundle: BodyBundle {

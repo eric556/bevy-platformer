@@ -186,6 +186,7 @@ fn move_player(
         player_query.iter_mut()
     {
         let prev_vel_sign = vel.0.x.signum();
+        vel.0 = Vec2::ZERO;
 
         if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right))
             || (keys.pressed(p_input.left) && keys.pressed(p_input.right))
@@ -205,10 +206,8 @@ fn move_player(
             vel.0.x = vel.0.x.min(player_stats.max_run_speed);
         }
 
-        if keys.pressed(p_input.jump) && state.grounded {
-            if vel.0.y < 40.0 {
-                vel.0.y += 5.0;
-            }
+        if keys.pressed(p_input.jump) {
+            vel.0.y += 50.0;
             // vel.apply_impulse(mass, Vec2::new(0.0, 10.0).into());
         }
     }
@@ -218,9 +217,9 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_system(move_player.system())
-            .add_system(update_player_animation.system().after("UPDATE_PLAYER_ANIMATION"))
+        app.add_system(move_player.system().before("MOVE_ACTORS"))
+            .add_system(update_player_animation.system().label("update_player_animation").before("MOVE_ACTORS"))
             // .add_system(update_player_grounded.system())
-            .add_system(Player::player_animation_update.system().label("UPDATE_PLAYER_ANIMATION").after("MOVE_ACTORS"));
+            .add_system(Player::player_animation_update.system().label("UPDATE_PLAYER_ANIMATION").before("update_player_animation"));
     }
 }
