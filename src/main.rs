@@ -227,57 +227,13 @@ fn setup_game(
     mut rapier_config: ResMut<RapierConfiguration>,
 ) {
 
-
-
-
-    // commands.spawn_bundle(ColliderBundle {
-    //     collider_type: ColliderType::Solid,
-    //     shape: ColliderShape::cuboid(40.0, 0.5),
-    //     flags: ColliderFlags {
-    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-    //         ..Default::default()
-    //     },
-    //     ..Default::default()
-    // });
-
-    // commands.spawn_bundle(ColliderBundle {
-    //     collider_type: ColliderType::Solid,
-    //     shape: ColliderShape::cuboid(1.0, 1.0),
-    //     position: [-1.0, 1.5].into(),
-    //     flags: ColliderFlags {
-    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-    //         ..Default::default()
-    //     },
-    //     ..Default::default()
-    // });
-
-    // commands.spawn_bundle(ColliderBundle {
-    //     collider_type: ColliderType::Solid,
-    //     shape: ColliderShape::cuboid(1.0, 0.5),
-    //     position: [-4.0, 4.5].into(),
-    //     flags: ColliderFlags {
-    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-    //         ..Default::default()
-    //     },
-    //     ..Default::default()
-    // });
-
-    // commands.spawn_bundle(ColliderBundle {
-    //     collider_type: ColliderType::Solid,
-    //     shape: ColliderShape::cuboid(1.0, 1.0),
-    //     position: [-7.0, 1.5].into(),
-    //     flags: ColliderFlags {
-    //         collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-    //         ..Default::default()
-    //     },
-    //     ..Default::default()
-    // });
 }
 
 // Spawn a tile. Check to see if it needs to flip on the x and/or y axis before spawning.
 fn display_tile(
     layer_info: LayerInfo,
     tile: &TileInstance,
+    level_world_pos: Vec2,
     commands: &mut Commands,
     handle: Handle<TextureAtlas>,
 ) {
@@ -299,8 +255,8 @@ fn display_tile(
                 layer_info.px_height,
                 layer_info.grid_cell_size,
                 4.0,
-                tile.px[0] as i32,
-                tile.px[1] as i32,
+                (tile.px[0] as f32 + level_world_pos.x) as i32,
+                (tile.px[1] as f32+ level_world_pos.y) as i32,
                 layer_info.z_index,
             ),
             rotation: flip(flip_x, flip_y),
@@ -371,144 +327,150 @@ fn update_ldtk_map(
         Color::hex(&map.ldtk_file.levels[0].bg_color[1..]).unwrap(),
     ));
 
-    for (idx, layer) in map.ldtk_file.levels[map.current_level].layer_instances.as_ref().unwrap().iter().enumerate().rev() {
-        let tileset_uid = layer.tileset_def_uid.unwrap_or(-1) as i32;
-        let layer_uid = layer.layer_def_uid as i32;
-
-        let layer_info = LayerInfo {
-            grid_width: layer.c_wid as i32,
-            _grid_height: layer.c_hei as i32,
-            grid_cell_size: layer.grid_size as i32,
-            z_index: 50 - idx as i32,
-            // todo gotta swap this over from a hard coded scale
-            px_width: layer.c_wid as f32 * (layer.grid_size as f32 * 4.0),
-            px_height: layer.c_hei as f32 * (layer.grid_size as f32 * 4.0),
-        };
-
-        match &layer.layer_instance_type[..] {
-            "Tiles" => {
-
-            }
-            "AutoLayer" => {
-
-            }
-            "IntGrid" => {
-                if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
-                    println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
-                    for tile in layer.auto_layer_tiles.iter() {
-                        display_tile(
-                            layer_info,
-                            tile,
-                            &mut commands,
-                            map_assets.0[&(layer_tileset_def_uid as i32)].clone()
-                        )
-                    } 
+    for i in 0..map.ldtk_file.levels.len() {
+        let level_ldtk_world_pos = Vec2::new(map.ldtk_file.levels[i].world_x as f32, map.ldtk_file.levels[i].world_y as f32);
+        println!("World LDTKPos({:?})", level_ldtk_world_pos);
+        for (idx, layer) in map.ldtk_file.levels[i].layer_instances.as_ref().unwrap().iter().enumerate().rev() {
+            let tileset_uid = layer.tileset_def_uid.unwrap_or(-1) as i32;
+            let layer_uid = layer.layer_def_uid as i32;
+    
+            let layer_info = LayerInfo {
+                grid_width: layer.c_wid as i32,
+                _grid_height: layer.c_hei as i32,
+                grid_cell_size: layer.grid_size as i32,
+                z_index: 50 - idx as i32,
+                // todo gotta swap this over from a hard coded scale
+                px_width: layer.c_wid as f32 * (layer.grid_size as f32 * 4.0),
+                px_height: layer.c_hei as f32 * (layer.grid_size as f32 * 4.0),
+            };
+    
+            match &layer.layer_instance_type[..] {
+                "Tiles" => {
+    
                 }
-            }
-            "Entities" => {
-                println!("Generating Entities Layer: {}", layer.identifier);
-                match &layer.identifier[..] {
-                    "Colliders" => {
-                        for entity in layer.entity_instances.iter() {
-                            let (bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
-                                Vec2::new(entity.px[0] as f32, entity.px[1] as f32), 
-                                Vec2::new(entity.width as f32, entity.height as f32), 
-                                Vec2::new(layer_info.px_width, layer_info.px_height), 
-                                4.0
-                            );
-
-                            let rapier_half_extents = bevy_half_extent / rapier_config.scale;
-                            let rapier_position = bevy_pos / rapier_config.scale;
-
-                            println!("Creating collider Size({:?}) Position({:?})", rapier_half_extents, rapier_position);
-
-                            commands.spawn_bundle(ColliderBundle {
-                                collider_type: ColliderType::Solid,
-                                shape: ColliderShape::cuboid(rapier_half_extents.x, rapier_half_extents.y),
-                                position: rapier_position.into(),
-                                flags: ColliderFlags {
-                                    collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            });
-                        }
+                "AutoLayer" => {
+    
+                }
+                "IntGrid" => {
+                    if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
+                        println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
+                        for tile in layer.auto_layer_tiles.iter() {
+                            display_tile(
+                                layer_info,
+                                tile,
+                                level_ldtk_world_pos,
+                                &mut commands,
+                                map_assets.0[&(layer_tileset_def_uid as i32)].clone()
+                            )
+                        } 
                     }
-                    "Entities" => {
-                        for entity in layer.entity_instances.iter() {
-                            println!("Entity: {}", entity.identifier);
-
-                            let (mut bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
-                                Vec2::new(entity.px[0] as f32, entity.px[1] as f32), 
-                                Vec2::new(entity.width as f32, entity.height as f32), 
-                                Vec2::new(layer_info.px_width, layer_info.px_height), 
-                                4.0
-                            );
-
-                            // todo idk why but I have to undo the half extent subtraction?
-                            bevy_pos = bevy_pos - bevy_half_extent;
-                            let rapier_half_extents = bevy_half_extent / rapier_config.scale;
-                            let rapier_position = bevy_pos / rapier_config.scale;
-
-                            println!("Spawning at position: {:?} {:?}", bevy_pos, bevy_half_extent);
-
-                            match &entity.identifier[..] {
-                                "Player" => {
-                                    commands
-                                    .spawn_bundle(PlayerBundle {
-                                        rigid_body: RigidBodyBundle {
-                                            body_type: RigidBodyType::Dynamic,
-                                            forces: RigidBodyForces {
-                                                gravity_scale: 5.0,
-                                                ..Default::default()
-                                            },
-                                            position: rapier_position.into(),
-                                            mass_properties: (RigidBodyMassPropsFlags::ROTATION_LOCKED).into(),
-                                            ..Default::default()
-                                        },
-                                        collider: ColliderBundle {
-                                            shape: ColliderShape::cuboid(rapier_half_extents.x, rapier_half_extents.y),
-                                            flags: ColliderFlags {
-                                                collision_groups: InteractionGroups::new(ENTITY_GROUP, GROUND_GROUP),
-                                                ..Default::default()
-                                            },
-                                            position: rapier_half_extents.into(),
-                                            ..Default::default()
-                                        },
-                                        health: Health(10u32),
-                                        player_stats: PlayerStats {
-                                            max_run_speed: 20.0,
-                                            speed_up: 5.0,
-                                        },
-                                        animation: AnimatedSpriteBundle {
-                                            sprite_sheet: SpriteSheetBundle {
-                                                texture_atlas: hero_char_texture_atalas_handle.clone(),
-                                                transform: Transform::from_scale(Vec3::splat(sprite_scale)),
-                                                ..Default::default()
-                                            },                
-                                            sprite_sheet_definitions: SpriteSheetDefinition { animation_definitions: hero_char_animation_definitions.clone(), rows: 15, columns: 8 },
-                                            animation_timer: Timer::from_seconds(0.1, true),
-                                            current_row: Row(5), // Set it up as the idle animation right away
-                                            current_col: Col(0)
-                                        },
+                }
+                "Entities" => {
+                    println!("Generating Entities Layer: {}", layer.identifier);
+                    match &layer.identifier[..] {
+                        "Colliders" => {
+                            for entity in layer.entity_instances.iter() {
+                                let (bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
+                                    Vec2::new(entity.px[0] as f32, entity.px[1] as f32) + level_ldtk_world_pos, 
+                                    Vec2::new(entity.width as f32, entity.height as f32), 
+                                    Vec2::new(layer_info.px_width, layer_info.px_height), 
+                                    4.0
+                                );
+    
+                                let rapier_half_extents = bevy_half_extent / rapier_config.scale;
+                                let rapier_position = bevy_pos / rapier_config.scale;
+    
+                                println!("Creating collider Size({:?}) Position({:?})", rapier_half_extents, rapier_position);
+    
+                                commands.spawn_bundle(ColliderBundle {
+                                    collider_type: ColliderType::Solid,
+                                    shape: ColliderShape::cuboid(rapier_half_extents.x, rapier_half_extents.y),
+                                    position: rapier_position.into(),
+                                    flags: ColliderFlags {
+                                        collision_groups: InteractionGroups::new(GROUND_GROUP, ENTITY_GROUP | SHAPE_CAST_GROUP),
                                         ..Default::default()
-                                    })
-                                    .insert(CameraTarget)
-                                    .insert(ColliderPositionSync::Discrete);
-                                }
-                                _ => {}
+                                    },
+                                    ..Default::default()
+                                });
                             }
-
                         }
-
+                        "Entities" => {
+                            for entity in layer.entity_instances.iter() {
+                                println!("Entity: {}", entity.identifier);
+    
+                                let (mut bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
+                                    Vec2::new(entity.px[0] as f32, entity.px[1] as f32) + level_ldtk_world_pos, 
+                                    Vec2::new(entity.width as f32, entity.height as f32), 
+                                    Vec2::new(layer_info.px_width, layer_info.px_height), 
+                                    4.0
+                                );
+    
+                                // have to undo the half extent because the origin is at the center
+                                bevy_pos = bevy_pos - bevy_half_extent;
+                                let rapier_half_extents = bevy_half_extent / rapier_config.scale;
+                                let rapier_position = bevy_pos / rapier_config.scale;
+    
+                                println!("Spawning at position: {:?} {:?}", bevy_pos, bevy_half_extent);
+    
+                                match &entity.identifier[..] {
+                                    "Player" => {
+                                        commands
+                                        .spawn_bundle(PlayerBundle {
+                                            rigid_body: RigidBodyBundle {
+                                                body_type: RigidBodyType::Dynamic,
+                                                forces: RigidBodyForces {
+                                                    gravity_scale: 5.0,
+                                                    ..Default::default()
+                                                },
+                                                position: rapier_position.into(),
+                                                mass_properties: (RigidBodyMassPropsFlags::ROTATION_LOCKED).into(),
+                                                ..Default::default()
+                                            },
+                                            collider: ColliderBundle {
+                                                shape: ColliderShape::cuboid(rapier_half_extents.x, rapier_half_extents.y),
+                                                flags: ColliderFlags {
+                                                    collision_groups: InteractionGroups::new(ENTITY_GROUP, GROUND_GROUP),
+                                                    ..Default::default()
+                                                },
+                                                position: rapier_half_extents.into(),
+                                                ..Default::default()
+                                            },
+                                            health: Health(10u32),
+                                            player_stats: PlayerStats {
+                                                max_run_speed: 20.0,
+                                                speed_up: 5.0,
+                                            },
+                                            animation: AnimatedSpriteBundle {
+                                                sprite_sheet: SpriteSheetBundle {
+                                                    texture_atlas: hero_char_texture_atalas_handle.clone(),
+                                                    transform: Transform::from_scale(Vec3::splat(sprite_scale)),
+                                                    ..Default::default()
+                                                },                
+                                                sprite_sheet_definitions: SpriteSheetDefinition { animation_definitions: hero_char_animation_definitions.clone(), rows: 15, columns: 8 },
+                                                animation_timer: Timer::from_seconds(0.1, true),
+                                                current_row: Row(5), // Set it up as the idle animation right away
+                                                current_col: Col(0)
+                                            },
+                                            ..Default::default()
+                                        })
+                                        .insert(CameraTarget)
+                                        .insert(ColliderPositionSync::Discrete);
+                                    }
+                                    _ => {}
+                                }
+    
+                            }
+    
+                        }
+                        _ => {}
                     }
-                    _ => {}
+    
                 }
-
+                _ => panic!("AHHHHHHHHH")
             }
-            _ => panic!("AHHHHHHHHH")
         }
     }
+
 
     map.redraw = false;
 }
