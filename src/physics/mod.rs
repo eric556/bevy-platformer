@@ -1,6 +1,6 @@
 use std::panic;
 
-use bevy::{math::{IVec2, Vec2}, prelude::{Color, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, ResMut, Transform}, render::render_graph::SlotLabel};
+use bevy::{core::Time, math::{IVec2, Vec2}, prelude::{Color, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, Transform}, render::render_graph::SlotLabel};
 use bevy_canvas::{Canvas, DrawMode, common_shapes::{Rectangle, RectangleAnchor}};
 use self::{body::{BodyType, Position, Remainder, Velocity}, collision::{AABB, Intersection}};
 
@@ -38,6 +38,7 @@ fn check_for_collision(
 }
 
 fn move_actor(
+    time: Res<Time>,
     mut stuff: QuerySet<(
         Query<(&mut Position, &mut Velocity, &mut Remainder, &AABB, &BodyType)>,
         Query<(&Position, &AABB, &BodyType)>

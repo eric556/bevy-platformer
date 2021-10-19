@@ -13,7 +13,7 @@ use ldtk_rust::{EntityInstance, Project, TileInstance};
 use physics::{DebugAABBPlugin, PhysicsPlugin, body::Velocity};
 use player::PlayerPlugin;
 
-use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, physics::{body::{BodyBundle, BodyType, Position}, collision::AABB}};
+use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, physics::{body::{BodyBundle, BodyType, Position}, collision::AABB}, player::{Health, PlayerBundle, PlayerStats}};
 
 pub mod player;
 pub mod animation;
@@ -104,15 +104,15 @@ fn flip(x: bool, y: bool) -> Quat {
     q1 * q2
 }
 
-// fn sprite_flip(mut sprite_query: Query<(&RigidBodyVelocity, &mut TextureAtlasSprite)>) {
-//     for (vel, mut sprite) in sprite_query.iter_mut() {
-//         if vel.linvel.x < 0.0 {
-//             sprite.flip_x = true;
-//         } else if vel.linvel.x > 0.0 {
-//             sprite.flip_x = false;
-//         }
-//     }
-// }
+fn sprite_flip(mut sprite_query: Query<(&Velocity, &mut TextureAtlasSprite)>) {
+    for (vel, mut sprite) in sprite_query.iter_mut() {
+        if vel.0.x < 0.0 {
+            sprite.flip_x = true;
+        } else if vel.0.x > 0.0 {
+            sprite.flip_x = false;
+        }
+    }
+}
 
 fn gravity(
     keys: Res<Input<KeyCode>>,
@@ -120,19 +120,7 @@ fn gravity(
 ) {
     for (mut vel, body_type) in actor_query.iter_mut() {
         if *body_type == BodyType::Actor {
-            if keys.pressed(KeyCode::A) {
-                vel.0.x -= 2.0;
-            }
-            if keys.pressed(KeyCode::D) {
-                vel.0.x += 2.0;
-            }
-            if keys.pressed(KeyCode::S) {
-                vel.0.y -= 2.0;
-            }
-            if keys.pressed(KeyCode::W) {
-                vel.0.y += 2.0;
-            }
-            // vel.0.y -= 9.81;
+            vel.0.y -= 9.81;
         }
     }
 }
@@ -392,14 +380,44 @@ fn update_ldtk_map(
     
                                 match &entity.identifier[..] {
                                     "Player" => {
-                                        commands.spawn_bundle(BodyBundle {
-                                            body_type: BodyType::Actor,
-                                            position: Position(bevy_pos),
-                                            ..Default::default()
-                                        }).insert(AABB {
-                                            position: IVec2::ZERO,
-                                            half_size: IVec2::new(bevy_half_extent.x.round() as i32, bevy_half_extent.y.round() as i32),
-                                        }).insert(CameraTarget);
+                                        // commands.spawn_bundle(BodyBundle {
+                                        //     body_type: BodyType::Actor,
+                                        //     position: Position(bevy_pos),
+                                        //     ..Default::default()
+                                        // }).insert(AABB {
+                                        //     position: IVec2::ZERO,
+                                        //     half_size: IVec2::new(bevy_half_extent.x.round() as i32, bevy_half_extent.y.round() as i32),
+                                        // }).insert(CameraTarget);
+
+                                            commands.spawn_bundle(PlayerBundle {
+                                                health: Health(10u32),
+                                                body_bundle: BodyBundle {
+                                                    body_type: BodyType::Actor,
+                                                    position: Position(bevy_pos),
+                                                    ..Default::default()
+                                                },
+                                                collider: AABB {
+                                                    position: IVec2::ZERO,
+                                                    half_size: IVec2::new(bevy_half_extent.x.round() as i32, bevy_half_extent.y.round() as i32),
+                                                },
+                                                animation: AnimatedSpriteBundle {
+                                                    sprite_sheet: SpriteSheetBundle {
+                                                        texture_atlas: hero_char_texture_atalas_handle.clone(),
+                                                        transform: Transform::from_scale(Vec3::splat(sprite_scale)),
+                                                        ..Default::default()
+                                                    },                
+                                                    sprite_sheet_definitions: SpriteSheetDefinition { animation_definitions: hero_char_animation_definitions.clone(), rows: 15, columns: 8 },
+                                                    animation_timer: Timer::from_seconds(0.1, true),
+                                                    current_row: Row(5), // Set it up as the idle animation right away
+                                                    current_col: Col(0)
+                                                },
+                                                player_stats: PlayerStats {
+                                                    max_run_speed: 20.0,
+                                                    speed_up: 5.0,
+                                                },
+                                                ..Default::default()
+                                            }).insert(CameraTarget);
+
                                     }
                                     _ => {}
                                 }
@@ -431,7 +449,6 @@ fn main() {
         .add_system(update_ldtk_map.system())
         .add_system(move_camera.system())
         .add_system(gravity.system().before("MOVE_ACTORS"))
-        // .add_system(debug_colliders.system())
-        // .add_system(sprite_flip.system())
+        .add_system(sprite_flip.system())
         .run();
 }
