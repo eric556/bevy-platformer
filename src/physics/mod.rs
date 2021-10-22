@@ -1,8 +1,8 @@
 use std::panic;
 
-use bevy::{core::Time, math::{IVec2, Vec2}, prelude::{Color, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, Transform}, render::render_graph::SlotLabel};
+use bevy::{core::{FixedTimestep, FixedTimesteps, Time}, math::{IVec2, Vec2}, prelude::{Color, CoreStage, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, StageLabel, SystemStage, Transform}, render::render_graph::SlotLabel};
 use bevy_canvas::{Canvas, DrawMode, common_shapes::{Rectangle, RectangleAnchor}};
-use self::{body::{BodyType, Position, Remainder, Velocity}, collision::{AABB, Intersection}};
+use self::{body::{Acceleration, BodyType, Position, Remainder, Velocity}, collision::{AABB, Intersection}};
 
 pub mod collision;
 pub mod body;
@@ -37,64 +37,112 @@ fn check_for_collision(
     return false;
 }
 
+fn move_x(
+    position: &mut Position, 
+    velocity: &mut Velocity, 
+    remainder: &mut Remainder, 
+    collider: &AABB,
+    solid_colliders: &Vec<(Position, AABB)>,
+    physics_params: &PhysicsParams, 
+    time: &Time
+) {
+    remainder.0.x += velocity.0.x * time.delta_seconds();
+    let mut movement: i32 = remainder.0.x.round() as i32;
+
+    if movement != 0i32 {
+        remainder.0.x -= movement as f32;
+        let sign = movement.signum();
+        while movement != 0i32 {
+            let next = Position(position.0 + Vec2::new(sign as f32, 0.0));
+            if !check_for_collision( &collider, &next, &solid_colliders) {
+                position.0.x += sign as f32;
+                movement -= sign;
+            } else {
+                velocity.0.x = 0.0;
+                // STOP WE HIT SOMETHING
+                break;  
+            }
+        }
+    }
+}
+
+fn move_y(
+    position: &mut Position, 
+    velocity: &mut Velocity, 
+    remainder: &mut Remainder, 
+    collider: &AABB,
+    solid_colliders: &Vec<(Position, AABB)>,
+    physics_params: &PhysicsParams, 
+    time: &Time
+) {
+    remainder.0.y += velocity.0.y * time.delta_seconds();
+    let mut movement: i32 = (velocity.0.y * time.delta_seconds()).round() as i32;
+    // println!("{:?}", remainder);
+
+    if movement != 0i32 {
+        remainder.0.y -= movement as f32;
+        let sign = movement.signum();
+        while movement != 0i32 {
+            let next = Position(position.0 + Vec2::new(0.0, sign as f32));
+            if !check_for_collision(&collider, &next , &solid_colliders) {
+                position.0.y += sign as f32;
+                movement -= sign;
+            } else {
+                velocity.0.y = 0.0;
+                // STOP WE HIT SOMETHING
+                break;  
+            }
+        }
+
+        // velocity.0 = Vec2::ZERO;
+    }
+}
+
 fn move_actor(
     time: Res<Time>,
+    physics_params: Res<PhysicsParams>,
+    fixed_timesteps: Res<FixedTimesteps>,
     mut stuff: QuerySet<(
-        Query<(&mut Position, &mut Velocity, &mut Remainder, &AABB, &BodyType)>,
+        Query<(&mut Position, &mut Velocity, &mut Acceleration, &mut Remainder, &AABB, &BodyType)>,
         Query<(&Position, &AABB, &BodyType)>
     )>
 ) {
-    let solid_colliders: Vec<(Position, AABB)> = stuff.q1().iter().filter(|(position, aabb, body_type)| {
+    let solid_colliders: Vec<(Position, AABB)> = stuff.q1().iter().filter(|(_, _, body_type)| {
         **body_type == BodyType::Solid
-    }).map(|(position, aabb, body_type)| {
+    }).map(|(position, aabb, _)| {
         (*position, *aabb)
     }).collect();
 
-    for (mut position, mut velocity, mut remainder, collider, body_type) in stuff.q0_mut().iter_mut() {
+    // let dt = fixed_timesteps.get("FIXED_TIME_STEP").unwrap();
+    let mut i = 0;
+    for (mut position, mut velocity, mut acceleration, mut remainder, collider, body_type) in stuff.q0_mut().iter_mut() {
+        
         if *body_type == BodyType::Actor {
-            // println!("Start Pos({:?})", position);
-            // Move X
-            remainder.0.x += velocity.0.x;
-            let mut movement: i32 = remainder.0.x.round() as i32;
+            velocity.0 = velocity.0 + physics_params.gravity * time.delta_seconds();
+            let start_position = position.0;
+            move_x(
+                &mut position, 
+                &mut velocity, 
+                &mut remainder, 
+                collider, 
+                &solid_colliders, 
+                &physics_params, 
+                &time
+            );
 
-            if movement != 0i32 {
-                remainder.0.x -= movement as f32;
-                let sign = movement.signum();
-                while movement != 0i32 {
-                    let next = Position(position.0 + Vec2::new(sign as f32, 0.0));
-                    if !check_for_collision( &collider, &next, &solid_colliders) {
-                        position.0.x += sign as f32;
-                        movement -= sign;
-                    } else {
-                        // STOP WE HIT SOMETHING
-                        break;  
-                    }
-                }
-            }
+            move_y(
+                &mut position, 
+                &mut velocity, 
+                &mut remainder, 
+                collider, 
+                &solid_colliders, 
+                &physics_params, 
+                &time
+            );
 
-            // Move Y
-            remainder.0.y += velocity.0.y;
-            movement = remainder.0.y.round() as i32;
-
-            if movement != 0i32 {
-                remainder.0.y -= movement as f32;
-                let sign = movement.signum();
-                while movement != 0i32 {
-                    let next = Position(position.0 + Vec2::new(0.0, sign as f32));
-                    if !check_for_collision(&collider, &next , &solid_colliders) {
-                        position.0.y += sign as f32;
-                        movement -= sign;
-                    } else {
-                        // STOP WE HIT SOMETHING
-                        break;  
-                    }
-                }
-            }
-
-            
-            // println!("End Pos({:?})", position);
+            velocity.1 = position.0 - start_position;
+            println!("Vel({:?}), Actual({:?})", velocity.0 * time.delta_seconds(), velocity.1);
         }
-
     }
 }
 
@@ -121,11 +169,33 @@ impl Plugin for DebugAABBPlugin {
     }
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
+pub enum PhysicsStages {
+    PreStep,
+    Step,
+    PostStep
+}
+
+#[derive(Default)]
+pub struct PhysicsParams{
+    pub gravity: Vec2
+}
+
 pub struct PhysicsPlugin;
 
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut bevy::prelude::AppBuilder) {
-        app.add_system(move_actor.system().label("MOVE_ACTORS"))
-        .add_system(apply_body_position_to_transform.system().after("MOVE_ACTORS"));
+        app
+        .insert_resource(PhysicsParams::default())
+        .add_stage_before(
+            CoreStage::Update, 
+            PhysicsStages::Step, 
+            SystemStage::parallel()
+            // .with_run_criteria(
+            //     FixedTimestep::step(1.0 / 60.0).with_label("FIXED_TIME_STEP")
+            // )
+            .with_system(move_actor.system().label("MOVE_ACTORS")))
+            .add_stage_before(PhysicsStages::Step, PhysicsStages::PreStep, SystemStage::parallel())
+            .add_stage_after(PhysicsStages::Step, PhysicsStages::PostStep, SystemStage::parallel().with_system(apply_body_position_to_transform.system()));
     }
-} 
+}  

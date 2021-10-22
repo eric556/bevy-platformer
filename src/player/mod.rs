@@ -4,27 +4,28 @@ use bevy_canvas::{
     Canvas, DrawMode,
 };
 
-use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{body::{BodyBundle, Velocity}, collision::AABB}};
+use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{PhysicsStages, body::{BodyBundle, Velocity}, collision::AABB}};
 use macros::animation_graph;
 
 animation_graph!(
     Player,
     {vel: crate::physics::body::Velocity},
     Jump {
-		Fall -> vel.0.y < 0.0
+		Fall -> vel.1.y <= 0.0,
 	},
 	Fall {
-		Idle -> vel.0.y == 0.0
+		Idle -> vel.1.y == 0.0,
+        Jump -> vel.1.y > 0.0
 	},
 	Idle {
-		Jump -> vel.0.y != 0.0 && vel.0.y > 0.0,
-		Fall -> vel.0.y != 0.0 && vel.0.y < 0.0,
-		Run ->  vel.0.x != 0.0
+		Jump -> vel.1.y != 0.0 && vel.1.y > 0.0,
+		Fall -> vel.1.y != 0.0 && vel.1.y < 0.0,
+		Run ->  vel.1.x != 0.0
 	},
 	Run {
-		Jump -> vel.0.y != 0.0 && vel.0.y > 0.0,
-		Fall -> vel.0.y != 0.0 && vel.0.y < 0.0,
-		Idle -> vel.0.x == 0.0
+		Jump -> vel.1.y != 0.0 && vel.1.y > 0.0,
+		Fall -> vel.1.y != 0.0 && vel.1.y < 0.0,
+		Idle -> vel.1.x == 0.0
 	}
 );
 
@@ -94,7 +95,6 @@ fn update_player_animation(
 ) {
     for (player_action, sprite_sheet_def, mut timer, mut row, mut col) in player_query.iter_mut()
     {
-        println!("{:?}", player_action);
         row.0 = match player_action {
             Player::PlayerAnimationUpdate::Idle => 5,
             Player::PlayerAnimationUpdate::Run => 1,
@@ -186,7 +186,6 @@ fn move_player(
         player_query.iter_mut()
     {
         let prev_vel_sign = vel.0.x.signum();
-        vel.0 = Vec2::ZERO;
 
         if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right))
             || (keys.pressed(p_input.left) && keys.pressed(p_input.right))
@@ -196,19 +195,22 @@ fn move_player(
             if prev_vel_sign > 0.0 {
                 vel.0.x = 0.0;
             }
-            vel.0.x -= player_stats.speed_up;
-            vel.0.x = vel.0.x.max(-player_stats.max_run_speed);
+            vel.0.x = -player_stats.speed_up;
+            // vel.0.x = vel.0.x.max(-player_stats.max_run_speed);
         } else if keys.pressed(p_input.right) {
             if prev_vel_sign < 0.0 {
                 vel.0.x = 0.0;
             }
-            vel.0.x += player_stats.speed_up;
-            vel.0.x = vel.0.x.min(player_stats.max_run_speed);
+            vel.0.x = player_stats.speed_up;
+            // vel.0.x = vel.0.x.min(player_stats.max_run_speed);
         }
 
         if keys.pressed(p_input.jump) {
-            vel.0.y += 50.0;
+            vel.0.y = player_stats.max_run_speed;
             // vel.apply_impulse(mass, Vec2::new(0.0, 10.0).into());
+        }
+        else if keys.pressed(KeyCode::S) {
+            vel.0.y = 5.0 * -player_stats.max_run_speed;
         }
     }
 }
@@ -217,9 +219,13 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_system(move_player.system().before("MOVE_ACTORS"))
-            .add_system(update_player_animation.system().label("update_player_animation").before("MOVE_ACTORS"))
+        app
+            .add_system_to_stage(PhysicsStages::PreStep, move_player.system().label("MOVE_PLAYER"))
+            // .add_system_to_stage(PhysicsStages::PostStep, Player::player_animation_update.system().label("player_animation_update"))
+            // .add_system_to_stage(PhysicsStages::PostStep, update_player_animation.system().after("player_animation_update"));
+
+            .add_system(update_player_animation.system().after("player_animation_update"))
             // .add_system(update_player_grounded.system())
-            .add_system(Player::player_animation_update.system().label("UPDATE_PLAYER_ANIMATION").before("update_player_animation"));
+            .add_system(Player::player_animation_update.system().label("player_animation_update"));
     }
 }

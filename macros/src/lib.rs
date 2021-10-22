@@ -150,8 +150,10 @@ pub fn animation_graph(input: TokenStream) -> TokenStream {
             pub fn #system_ident (
                 mut #query_ident: bevy::ecs::system::Query<(&mut #enum_ident, #(&#param_types,)*)>
             ) {
+                let mut i = 0;
                 for (mut #enum_query_for_ident, #(#param_names,)*) in #query_ident.iter_mut() {
-                    println!("In here {:?}", #enum_query_for_ident);
+                    // println!("vel here {:?} {}", vel, i);
+                    i = i + 1;
                     match *#enum_query_for_ident {
                         #(#states_match_statment)*
                     }

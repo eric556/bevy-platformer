@@ -8,9 +8,10 @@ use bevy_canvas::{
     Canvas, DrawMode,
 };
 
+use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
 use fastapprox::fast::ln;
 use ldtk_rust::{EntityInstance, Project, TileInstance};
-use physics::{DebugAABBPlugin, PhysicsPlugin, body::Velocity};
+use physics::{DebugAABBPlugin, PhysicsParams, PhysicsPlugin, PhysicsStages, body::Velocity};
 use player::PlayerPlugin;
 
 use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, physics::{body::{BodyBundle, BodyType, Position}, collision::AABB}, player::{Health, PlayerBundle, PlayerStats}};
@@ -114,17 +115,6 @@ fn sprite_flip(mut sprite_query: Query<(&Velocity, &mut TextureAtlasSprite)>) {
     }
 }
 
-fn gravity(
-    keys: Res<Input<KeyCode>>,
-    mut actor_query: Query<(&mut Velocity, &BodyType)> 
-) {
-    for (mut vel, body_type) in actor_query.iter_mut() {
-        if *body_type == BodyType::Actor {
-            vel.0.y -= 9.81;
-        }
-    }
-}
-
 fn move_camera(
     target_query: Query<&Transform, With<CameraTarget>>,
     mut camera_query: Query<&mut Transform, (With<MainCamera>, Without<CameraTarget>)>,
@@ -165,16 +155,19 @@ fn move_camera(
 fn setup_tilemap(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut physics_params: ResMut<PhysicsParams>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>
 ) {
 
     // Load up the map
     let map = Map {
-        ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
-        // ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
+        // ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
+        ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
         redraw: true,
         current_level: 0,
     };
+
+    physics_params.gravity = Vec2::new(0.0, -1000.0);
 
     // Go through and grab all the map tile sets
     let mut map_assets = LdtkMapAssets(HashMap::new());
@@ -403,8 +396,8 @@ fn update_ldtk_map(
                                                     current_col: Col(0)
                                                 },
                                                 player_stats: PlayerStats {
-                                                    max_run_speed: 20.0,
-                                                    speed_up: 5.0,
+                                                    max_run_speed: 200.0,
+                                                    speed_up: 1000.0,
                                                 },
                                                 ..Default::default()
                                             }).insert(CameraTarget);
@@ -428,18 +421,23 @@ fn update_ldtk_map(
 }
 
 fn main() {
-    App::build()
-        .add_plugins(DefaultPlugins)
+    let mut app = App::build();
+        app .add_plugins(DefaultPlugins)
         // .add_startup_system(setup_game.system())
         .add_startup_system(setup_tilemap.system())
         .add_plugin(bevy_canvas::CanvasPlugin)
+        .add_plugin(PhysicsPlugin)
         .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
-        .add_plugin(PhysicsPlugin)
         .add_plugin(DebugAABBPlugin)
         .add_system(update_ldtk_map.system())
         .add_system(move_camera.system())
-        .add_system(gravity.system().before("MOVE_ACTORS"))
-        .add_system(sprite_flip.system())
-        .run();
+        // .add_system_to_stage(PhysicsStages::PreStep, gravity.system().after("MOVE_PLAYER"))
+        // .add_system(gravity.system())
+        .add_system(sprite_flip.system());
+
+        // app.set_runner(bevy_mod_debugdump::)
+
+        println!("{}", schedule_graph_dot(&app.app.schedule));
+        app.run();
 }

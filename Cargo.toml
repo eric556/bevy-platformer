@@ -11,4 +11,5 @@ bevy = "0.5"
 bevy_canvas = "0.1"
 ldtk_rust = "0.5.2"
 fastapprox = "0.3.0"
+bevy_mod_debugdump = "0.2"
 macros = { path="macros" }
