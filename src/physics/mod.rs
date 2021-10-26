@@ -43,7 +43,6 @@ fn move_x(
     remainder: &mut Remainder, 
     collider: &AABB,
     solid_colliders: &Vec<(Position, AABB)>,
-    physics_params: &PhysicsParams, 
     time: &Time
 ) {
     remainder.0.x += velocity.0.x * time.delta_seconds();
@@ -72,7 +71,6 @@ fn move_y(
     remainder: &mut Remainder, 
     collider: &AABB,
     solid_colliders: &Vec<(Position, AABB)>,
-    physics_params: &PhysicsParams, 
     time: &Time
 ) {
     remainder.0.y += velocity.0.y * time.delta_seconds();
@@ -100,7 +98,6 @@ fn move_y(
 
 fn move_actor(
     time: Res<Time>,
-    physics_params: Res<PhysicsParams>,
     fixed_timesteps: Res<FixedTimesteps>,
     mut stuff: QuerySet<(
         Query<(&mut Position, &mut Velocity, &mut Acceleration, &mut Remainder, &AABB, &BodyType)>,
@@ -118,7 +115,6 @@ fn move_actor(
     for (mut position, mut velocity, mut acceleration, mut remainder, collider, body_type) in stuff.q0_mut().iter_mut() {
         
         if *body_type == BodyType::Actor {
-            velocity.0 = velocity.0 + physics_params.gravity * time.delta_seconds();
             let start_position = position.0;
             move_x(
                 &mut position, 
@@ -126,7 +122,6 @@ fn move_actor(
                 &mut remainder, 
                 collider, 
                 &solid_colliders, 
-                &physics_params, 
                 &time
             );
 
@@ -136,7 +131,6 @@ fn move_actor(
                 &mut remainder, 
                 collider, 
                 &solid_colliders, 
-                &physics_params, 
                 &time
             );
 
@@ -176,17 +170,11 @@ pub enum PhysicsStages {
     PostStep
 }
 
-#[derive(Default)]
-pub struct PhysicsParams{
-    pub gravity: Vec2
-}
-
 pub struct PhysicsPlugin;
 
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut bevy::prelude::AppBuilder) {
         app
-        .insert_resource(PhysicsParams::default())
         .add_stage_before(
             CoreStage::Update, 
             PhysicsStages::Step, 

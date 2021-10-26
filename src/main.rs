@@ -11,7 +11,7 @@ use bevy_canvas::{
 use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
 use fastapprox::fast::ln;
 use ldtk_rust::{EntityInstance, Project, TileInstance};
-use physics::{DebugAABBPlugin, PhysicsParams, PhysicsPlugin, PhysicsStages, body::Velocity};
+use physics::{DebugAABBPlugin, PhysicsPlugin, PhysicsStages, body::Velocity};
 use player::PlayerPlugin;
 
 use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, physics::{body::{BodyBundle, BodyType, Position}, collision::AABB}, player::{Health, PlayerBundle, PlayerStats}};
@@ -155,7 +155,6 @@ fn move_camera(
 fn setup_tilemap(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut physics_params: ResMut<PhysicsParams>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>
 ) {
 
@@ -166,8 +165,6 @@ fn setup_tilemap(
         redraw: true,
         current_level: 0,
     };
-
-    physics_params.gravity = Vec2::new(0.0, -1000.0);
 
     // Go through and grab all the map tile sets
     let mut map_assets = LdtkMapAssets(HashMap::new());
