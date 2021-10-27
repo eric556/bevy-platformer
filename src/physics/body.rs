@@ -3,16 +3,19 @@ use bevy::{math::{IVec2, Vec2}, prelude::Bundle};
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Position(pub Vec2);
 
-/// Velocity, Actual Velocity
 #[derive(Default, Debug)]
-pub struct Velocity (pub Vec2, pub Vec2);
+pub struct Velocity(pub Vec2);
 
-/// Acceleration of the body, not used for physics calculations
 #[derive(Default, Debug)]
 pub struct Acceleration(pub Vec2, pub Vec2);
 
 #[derive(Default, Debug)]
 pub struct Remainder(pub Vec2);
+
+#[derive(Default, Debug)]
+pub struct BodyParams {
+    pub max_speed: Option<Vec2> 
+}
 
 #[derive(PartialEq, Debug)]
 pub enum BodyType {
@@ -32,5 +35,6 @@ pub struct BodyBundle {
     pub position: Position,
     pub velocity: Velocity,
     pub acceleration: Acceleration,
-    pub remainder: Remainder
+    pub remainder: Remainder,
+    pub body_params: BodyParams
 }

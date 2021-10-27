@@ -3,10 +3,11 @@ use std::collections::HashMap;
 
 use animation::{AnimationPlugin, Col, Row, SpriteSheetDefinition};
 use bevy::{math::Vec3Swizzles, prelude::*};
+use bevy_egui::EguiPlugin;
 use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
 use fastapprox::fast::ln;
 use ldtk_rust::{Project, TileInstance};
-use physics::{body::Velocity, DebugAABBPlugin, PhysicsPlugin};
+use physics::{DebugPhysicsPlugin, PhysicsPlugin, body::{BodyParams, Velocity}};
 use player::PlayerPlugin;
 
 use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, camera::{CameraPlugin, CameraTarget, MainCamera}, physics::{
@@ -37,6 +38,14 @@ struct LayerInfo {
     px_width: f32,
     px_height: f32,
 }
+
+#[derive(Debug, Default)]
+pub struct Scale(pub f32);
+
+pub struct PlayerAnimationsAssets {
+    pub texture_atlas: Handle<TextureAtlas>,
+    pub animation_definitions: Vec<AnimationDefinition>
+} 
 
 // LDtk provides pixel locations starting in the top left. For Bevy we need to
 // flip the Y axis and offset from the center of the screen.
@@ -69,53 +78,8 @@ fn flip(x: bool, y: bool) -> Quat {
     q1 * q2
 }
 
-fn sprite_flip(mut sprite_query: Query<(&Velocity, &mut TextureAtlasSprite)>) {
-    for (vel, mut sprite) in sprite_query.iter_mut() {
-        if vel.0.x < 0.0 {
-            sprite.flip_x = true;
-        } else if vel.0.x > 0.0 {
-            sprite.flip_x = false;
-        }
-    }
-}
-
-fn setup_tilemap(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
-) {
-    // Load up the map
-    let map = Map {
-        // ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
-        ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
-        redraw: true,
-        current_level: 0,
-    };
-
-    // Go through and grab all the map tile sets
-    let mut map_assets = LdtkMapAssets(HashMap::new());
-    for tileset in map.ldtk_file.defs.tilesets.iter() {
-        let texture_handle = asset_server.load(&tileset.rel_path[..]);
-
-        let texture_atlas = TextureAtlas::from_grid(
-            texture_handle,
-            Vec2::new(tileset.tile_grid_size as f32, tileset.tile_grid_size as f32),
-            (tileset.px_wid / tileset.tile_grid_size) as usize,
-            (tileset.px_hei / tileset.tile_grid_size) as usize,
-        );
-        let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        map_assets
-            .0
-            .insert(tileset.uid as i32, texture_atlas_handle);
-    }
-
-    // Slap these bad boys into resources
-    commands.insert_resource(map);
-    commands.insert_resource(map_assets);
-}
-
 // Spawn a tile. Check to see if it needs to flip on the x and/or y axis before spawning.
-fn display_tile(
+fn spawn_tile(
     layer_info: LayerInfo,
     tile: &TileInstance,
     level_world_pos: Vec2,
@@ -172,38 +136,162 @@ pub fn convert_ldtk_entity_to_bevy(
     )
 }
 
+fn sprite_flip(mut sprite_query: Query<(&Velocity, &mut TextureAtlasSprite)>) {
+    for (vel, mut sprite) in sprite_query.iter_mut() {
+        if vel.0.x < 0.0 {
+            sprite.flip_x = true;
+        } else if vel.0.x > 0.0 {
+            sprite.flip_x = false;
+        }
+    }
+}
+
+fn spawn_collider(
+    commands: &mut Commands,
+    position: Vec2,
+    half_extents: Vec2,
+
+) {
+    commands.spawn_bundle(BodyBundle {
+        position: Position(position),
+        ..Default::default()
+    })
+    .insert(AABB {
+        position: IVec2::ZERO,
+        half_size: IVec2::new(
+            half_extents.x.round() as i32,
+            half_extents.y.round() as i32,
+        ),
+    });
+}
+
+fn spawn_player(
+    commands: &mut Commands,
+    player_animations: &PlayerAnimationsAssets,
+    position: Vec2,
+    half_extents: Vec2,
+    scale: f32
+) {
+    commands
+    .spawn_bundle(PlayerBundle {
+        health: Health(10u32),
+        body_bundle: BodyBundle {
+            body_type: BodyType::Actor,
+            position: Position(position),
+            body_params: BodyParams {
+                max_speed: Some(Vec2::new(1000f32, 1000f32))
+            },
+            ..Default::default()
+        },
+        collider: AABB {
+            position: IVec2::ZERO,
+            half_size: IVec2::new(
+                half_extents.x.round() as i32,
+                half_extents.y.round() as i32,
+            ),
+        },
+        animation: AnimatedSpriteBundle {
+            sprite_sheet: SpriteSheetBundle {
+                texture_atlas:
+                player_animations.texture_atlas.clone(),
+                transform: Transform::from_scale(
+                    Vec3::splat(scale),
+                ),
+                ..Default::default()
+            },
+            sprite_sheet_definitions:
+                SpriteSheetDefinition {
+                    animation_definitions:
+                    player_animations.animation_definitions.clone(),
+                    rows: 15,
+                    columns: 8,
+                },
+            animation_timer: Timer::from_seconds(0.1, true),
+            current_row: Row(5), // Set it up as the idle animation right away
+            current_col: Col(0),
+        },
+        player_stats: PlayerStats {
+            max_run_speed: 200.0,
+            speed_up: 9000.0,
+        },
+        ..Default::default()
+    })
+    .insert(CameraTarget);
+}
+
+fn setup_animation_assets(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+) {
+    let hero_char_texture_sheet_handle = asset_server.load("herochar_spritesheet.png");
+    let hero_char_atlas = TextureAtlas::from_grid(hero_char_texture_sheet_handle, Vec2::new(16.0, 16.0), 8, 15);
+
+    let player_animation_assets = PlayerAnimationsAssets {
+        texture_atlas: texture_atlases.add(hero_char_atlas),
+        animation_definitions: vec![
+            AnimationDefinition {name: String::from("death"), number_of_frames: 8, frame_time: 0.0, repeating: true},
+            AnimationDefinition {name: String::from("run"), number_of_frames: 6, frame_time: 0.07, repeating: true},
+            AnimationDefinition {name: String::from("pushing"), number_of_frames: 6, frame_time: 0.1, repeating: true},
+            AnimationDefinition {name: String::from("attack_no_slash"), number_of_frames: 4, frame_time: 0.1, repeating: false},
+            // ? What should we do about long boy animations (multiframe)
+            AnimationDefinition {name: String::from("attack_slash"), number_of_frames: 8, frame_time: 0.1, repeating: false},
+            AnimationDefinition {name: String::from("idle"), number_of_frames: 4, frame_time: 0.1, repeating: true},
+            AnimationDefinition {name: String::from("falling"), number_of_frames: 3, frame_time: 0.07, repeating: true},
+            AnimationDefinition {name: String::from("jumping"), number_of_frames: 3, frame_time: 0.07, repeating: true},
+        ],
+    };
+
+    commands.insert_resource(player_animation_assets);
+}
+
+fn setup_tilemap(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+) {
+    // Load up the map
+    let map = Map {
+        // ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
+        ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
+        redraw: true,
+        current_level: 0,
+    };
+
+    // Go through and grab all the map tile sets
+    let mut map_assets = LdtkMapAssets(HashMap::new());
+    for tileset in map.ldtk_file.defs.tilesets.iter() {
+        let texture_handle = asset_server.load(&tileset.rel_path[..]);
+
+        let texture_atlas = TextureAtlas::from_grid(
+            texture_handle,
+            Vec2::new(tileset.tile_grid_size as f32, tileset.tile_grid_size as f32),
+            (tileset.px_wid / tileset.tile_grid_size) as usize,
+            (tileset.px_hei / tileset.tile_grid_size) as usize,
+        );
+        let texture_atlas_handle = texture_atlases.add(texture_atlas);
+        map_assets
+            .0
+            .insert(tileset.uid as i32, texture_atlas_handle);
+    }
+
+    // Slap these bad boys into resources
+    commands.insert_resource(map);
+    commands.insert_resource(map_assets);
+}
+
 fn update_ldtk_map(
     mut commands: Commands,
     mut map: ResMut<Map>,
     map_assets: Res<LdtkMapAssets>,
-    asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
-    scale: Res<Scale>
+    scale: Res<Scale>,
+    player_animations: Res<PlayerAnimationsAssets>
 ) {
     if !map.redraw {
         return;
     }
 
-    let hero_char_texture_sheet_handle = asset_server.load("herochar_spritesheet.png");
-    let hero_char_atlas =
-        TextureAtlas::from_grid(hero_char_texture_sheet_handle, Vec2::new(16.0, 16.0), 8, 15);
-    let hero_char_texture_atalas_handle = texture_atlases.add(hero_char_atlas);
-
-    let hero_char_animation_definitions: Vec<AnimationDefinition> = vec![
-        AnimationDefinition {name: String::from("death"), number_of_frames: 8, frame_time: 0.0, repeating: true},
-        AnimationDefinition {name: String::from("run"), number_of_frames: 6, frame_time: 0.07, repeating: true},
-        AnimationDefinition {name: String::from("pushing"), number_of_frames: 6, frame_time: 0.1, repeating: true},
-        AnimationDefinition {name: String::from("attack_no_slash"), number_of_frames: 4, frame_time: 0.1, repeating: false},
-        // ? What should we do about long boy animations (multiframe)
-        AnimationDefinition {name: String::from("attack_slash"), number_of_frames: 8, frame_time: 0.1, repeating: false},
-        AnimationDefinition {name: String::from("idle"), number_of_frames: 4, frame_time: 0.1, repeating: true},
-        AnimationDefinition {name: String::from("falling"), number_of_frames: 3, frame_time: 0.07, repeating: true},
-        AnimationDefinition {name: String::from("jumping"), number_of_frames: 3, frame_time: 0.07, repeating: true},
-    ];
-
-    commands
-        .spawn_bundle(OrthographicCameraBundle::new_2d())
-        .insert(MainCamera);
+    commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera);
 
     commands.insert_resource(ClearColor(
         Color::hex(&map.ldtk_file.levels[0].bg_color[1..]).unwrap(),
@@ -241,7 +329,7 @@ fn update_ldtk_map(
                     if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
                         println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
                         for tile in layer.grid_tiles.iter() {
-                            display_tile(
+                            spawn_tile(
                                 layer_info,
                                 tile,
                                 level_ldtk_world_pos,
@@ -257,7 +345,7 @@ fn update_ldtk_map(
                     if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
                         println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
                         for tile in layer.auto_layer_tiles.iter() {
-                            display_tile(
+                            spawn_tile(
                                 layer_info,
                                 tile,
                                 level_ldtk_world_pos,
@@ -286,25 +374,14 @@ fn update_ldtk_map(
                                     bevy_half_extent, bevy_pos
                                 );
 
-                                commands
-                                    .spawn_bundle(BodyBundle {
-                                        position: Position(bevy_pos),
-                                        ..Default::default()
-                                    })
-                                    .insert(AABB {
-                                        position: IVec2::ZERO,
-                                        half_size: IVec2::new(
-                                            bevy_half_extent.x.round() as i32,
-                                            bevy_half_extent.y.round() as i32,
-                                        ),
-                                    });
+                                spawn_collider(&mut commands, bevy_pos, bevy_half_extent);
                             }
                         }
                         "Entities" => {
                             for entity in layer.entity_instances.iter() {
                                 println!("Entity: {}", entity.identifier);
 
-                                let (mut bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
+                                let (bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
                                     Vec2::new(entity.px[0] as f32, entity.px[1] as f32)
                                         + level_ldtk_world_pos,
                                     Vec2::new(entity.width as f32, entity.height as f32),
@@ -318,51 +395,7 @@ fn update_ldtk_map(
                                 );
 
                                 match &entity.identifier[..] {
-                                    "Player" => {
-                                        commands
-                                            .spawn_bundle(PlayerBundle {
-                                                health: Health(10u32),
-                                                body_bundle: BodyBundle {
-                                                    body_type: BodyType::Actor,
-                                                    position: Position(bevy_pos),
-                                                    ..Default::default()
-                                                },
-                                                collider: AABB {
-                                                    position: IVec2::ZERO,
-                                                    half_size: IVec2::new(
-                                                        bevy_half_extent.x.round() as i32,
-                                                        bevy_half_extent.y.round() as i32,
-                                                    ),
-                                                },
-                                                animation: AnimatedSpriteBundle {
-                                                    sprite_sheet: SpriteSheetBundle {
-                                                        texture_atlas:
-                                                            hero_char_texture_atalas_handle.clone(),
-                                                        transform: Transform::from_scale(
-                                                            Vec3::splat(scale.0),
-                                                        ),
-                                                        ..Default::default()
-                                                    },
-                                                    sprite_sheet_definitions:
-                                                        SpriteSheetDefinition {
-                                                            animation_definitions:
-                                                                hero_char_animation_definitions
-                                                                    .clone(),
-                                                            rows: 15,
-                                                            columns: 8,
-                                                        },
-                                                    animation_timer: Timer::from_seconds(0.1, true),
-                                                    current_row: Row(5), // Set it up as the idle animation right away
-                                                    current_col: Col(0),
-                                                },
-                                                player_stats: PlayerStats {
-                                                    max_run_speed: 200.0,
-                                                    speed_up: 1000.0,
-                                                },
-                                                ..Default::default()
-                                            })
-                                            .insert(CameraTarget);
-                                    }
+                                    "Player" => spawn_player(&mut commands, &player_animations, bevy_pos, bevy_half_extent, scale.0),
                                     _ => {}
                                 }
                             }
@@ -378,23 +411,29 @@ fn update_ldtk_map(
     map.redraw = false;
 }
 
-#[derive(Debug, Default)]
-pub struct Scale(pub f32);
-
 fn main() {
     let mut app = App::build();
+    // Resources
+    app.insert_resource(Scale(4.0));
+
+    // Plugins
     app.add_plugins(DefaultPlugins)
         .add_plugin(bevy_canvas::CanvasPlugin)
-        .insert_resource(Scale(16.0))
+        .add_plugin(EguiPlugin)
         .add_plugin(PhysicsPlugin)
         .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
         .add_plugin(CameraPlugin)
-        .add_plugin(DebugAABBPlugin)
-        .add_startup_system(setup_tilemap.system())
-        .add_system(update_ldtk_map.system())
+        .add_plugin(DebugPhysicsPlugin);
+    
+    // Startup Systems
+    app.add_startup_system(setup_tilemap.system())
+        .add_startup_system(setup_animation_assets.system());
+        
+    // Systems
+    app.add_system(update_ldtk_map.system())
         .add_system(sprite_flip.system());
-
+        
     // Dumping the schedule as a graphviz graph
     println!("{}", schedule_graph_dot(&app.app.schedule));
 

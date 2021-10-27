@@ -4,28 +4,28 @@ use bevy_canvas::{
     Canvas, DrawMode,
 };
 
-use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{PhysicsStages, body::{BodyBundle, Velocity}, collision::AABB}};
+use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{PhysicsStages, body::{Acceleration, BodyBundle, Velocity}, collision::AABB}};
 use macros::animation_graph;
 
 animation_graph!(
     Player,
     {vel: crate::physics::body::Velocity},
     Jump {
-		Fall -> vel.1.y <= 0.0,
+		Fall -> vel.0.y <= 0.0,
 	},
 	Fall {
-		Idle -> vel.1.y == 0.0,
-        Jump -> vel.1.y > 0.0
+		Idle -> vel.0.y == 0.0,
+        Jump -> vel.0.y > 0.0
 	},
 	Idle {
-		Jump -> vel.1.y != 0.0 && vel.1.y > 0.0,
-		Fall -> vel.1.y != 0.0 && vel.1.y < 0.0,
-		Run ->  vel.1.x != 0.0
+		Jump -> vel.0.y != 0.0 && vel.0.y > 0.0,
+		Fall -> vel.0.y != 0.0 && vel.0.y < 0.0,
+		Run ->  vel.0.x != 0.0
 	},
 	Run {
-		Jump -> vel.1.y != 0.0 && vel.1.y > 0.0,
-		Fall -> vel.1.y != 0.0 && vel.1.y < 0.0,
-		Idle -> vel.1.x == 0.0
+		Jump -> vel.0.y != 0.0 && vel.0.y > 0.0,
+		Fall -> vel.0.y != 0.0 && vel.0.y < 0.0,
+		Idle -> vel.0.x == 0.0
 	}
 );
 
@@ -179,10 +179,11 @@ fn move_player(
         &PlayerInput,
         &PlayerStats,
         &PlayerState,
-        &mut Velocity
+        &mut Velocity,
+        &mut Acceleration
     )>,
 ) {
-    for (p_input, player_stats, state, mut vel) in
+    for (p_input, player_stats, state, mut vel, mut accel) in
         player_query.iter_mut()
     {
         let prev_vel_sign = vel.0.x.signum();
@@ -190,27 +191,27 @@ fn move_player(
         if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right))
             || (keys.pressed(p_input.left) && keys.pressed(p_input.right))
         {
-            vel.0.x = 0.0;
+            // vel.velocity.x = 0.0;
+            // accel.0.x = 0.0;
         } else if keys.pressed(p_input.left) {
-            if prev_vel_sign > 0.0 {
-                vel.0.x = 0.0;
-            }
-            vel.0.x = -player_stats.speed_up;
+            // if prev_vel_sign > 0.0 {
+            //     vel.velocity.x = 0.0;
+            // }
+            accel.0.x += -player_stats.speed_up;
             // vel.0.x = vel.0.x.max(-player_stats.max_run_speed);
         } else if keys.pressed(p_input.right) {
-            if prev_vel_sign < 0.0 {
-                vel.0.x = 0.0;
-            }
-            vel.0.x = player_stats.speed_up;
+            // if prev_vel_sign < 0.0 {
+            //     vel.velocity.x = 0.0;
+            // }
+            accel.0.x += player_stats.speed_up;
             // vel.0.x = vel.0.x.min(player_stats.max_run_speed);
         }
 
         if keys.pressed(p_input.jump) {
-            vel.0.y = player_stats.max_run_speed;
-            // vel.apply_impulse(mass, Vec2::new(0.0, 10.0).into());
+            accel.0.y += player_stats.speed_up;
         }
         else if keys.pressed(KeyCode::S) {
-            vel.0.y = 5.0 * -player_stats.max_run_speed;
+            accel.0.y += -player_stats.speed_up;
         }
     }
 }
@@ -221,11 +222,7 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app
             .add_system_to_stage(PhysicsStages::PreStep, move_player.system().label("MOVE_PLAYER"))
-            // .add_system_to_stage(PhysicsStages::PostStep, Player::player_animation_update.system().label("player_animation_update"))
-            // .add_system_to_stage(PhysicsStages::PostStep, update_player_animation.system().after("player_animation_update"));
-
             .add_system(update_player_animation.system().after("player_animation_update"))
-            // .add_system(update_player_grounded.system())
             .add_system(Player::player_animation_update.system().label("player_animation_update"));
     }
 }

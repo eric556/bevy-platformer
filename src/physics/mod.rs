@@ -1,8 +1,7 @@
-use std::panic;
-
-use bevy::{core::{FixedTimestep, FixedTimesteps, Time}, math::{IVec2, Vec2}, prelude::{Color, CoreStage, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, StageLabel, SystemStage, Transform}, render::render_graph::SlotLabel};
+use bevy::{core::{FixedTimestep, FixedTimesteps, Time}, math::{IVec2, Vec2}, prelude::{Color, CoreStage, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, StageLabel, SystemStage, SystemLabel, Transform}};
 use bevy_canvas::{Canvas, DrawMode, common_shapes::{Rectangle, RectangleAnchor}};
-use self::{body::{Acceleration, BodyType, Position, Remainder, Velocity}, collision::{AABB, Intersection}};
+use bevy_egui::{EguiContext, egui::Window};
+use self::{body::{Acceleration, BodyParams, BodyType, Position, Remainder, Velocity}, collision::{AABB, Intersection}};
 
 pub mod collision;
 pub mod body;
@@ -26,26 +25,22 @@ fn check_for_collision(
         let current_ent_pos = IVec2::new(position.0.x.round() as i32, position.0.y.round() as i32);
         let other_ent_pos = IVec2::new(other_position.0.x.round() as i32, other_position.0.y.round() as i32);
 
-        // println!("Checking {:?} vs {:?}", collider.adjusted_position(&current_ent_pos), other_collider.adjusted_position(&other_ent_pos));
-
         if AABB::interescts(&collider.adjusted_position(&current_ent_pos), &other_collider.adjusted_position(&other_ent_pos)) {
             return true;
         }
-
     }
 
     return false;
 }
 
 fn move_x(
+    move_amount: &f32,
     position: &mut Position, 
-    velocity: &mut Velocity, 
     remainder: &mut Remainder, 
     collider: &AABB,
     solid_colliders: &Vec<(Position, AABB)>,
-    time: &Time
 ) {
-    remainder.0.x += velocity.0.x * time.delta_seconds();
+    remainder.0.x += move_amount;
     let mut movement: i32 = remainder.0.x.round() as i32;
 
     if movement != 0i32 {
@@ -57,7 +52,6 @@ fn move_x(
                 position.0.x += sign as f32;
                 movement -= sign;
             } else {
-                velocity.0.x = 0.0;
                 // STOP WE HIT SOMETHING
                 break;  
             }
@@ -66,16 +60,15 @@ fn move_x(
 }
 
 fn move_y(
+    move_amount: &f32,
     position: &mut Position, 
-    velocity: &mut Velocity, 
     remainder: &mut Remainder, 
     collider: &AABB,
     solid_colliders: &Vec<(Position, AABB)>,
-    time: &Time
 ) {
-    remainder.0.y += velocity.0.y * time.delta_seconds();
-    let mut movement: i32 = (velocity.0.y * time.delta_seconds()).round() as i32;
-    // println!("{:?}", remainder);
+    // println!("Remainder {:?}", remainder);
+    remainder.0.y += move_amount;
+    let mut movement: i32 = remainder.0.y.round() as i32;
 
     if movement != 0i32 {
         remainder.0.y -= movement as f32;
@@ -86,7 +79,6 @@ fn move_y(
                 position.0.y += sign as f32;
                 movement -= sign;
             } else {
-                velocity.0.y = 0.0;
                 // STOP WE HIT SOMETHING
                 break;  
             }
@@ -98,9 +90,8 @@ fn move_y(
 
 fn move_actor(
     time: Res<Time>,
-    fixed_timesteps: Res<FixedTimesteps>,
     mut stuff: QuerySet<(
-        Query<(&mut Position, &mut Velocity, &mut Acceleration, &mut Remainder, &AABB, &BodyType)>,
+        Query<(&mut Position, &mut Velocity, &mut Acceleration, &mut Remainder, &AABB, &BodyType, &BodyParams)>,
         Query<(&Position, &AABB, &BodyType)>
     )>
 ) {
@@ -111,33 +102,56 @@ fn move_actor(
     }).collect();
 
     // let dt = fixed_timesteps.get("FIXED_TIME_STEP").unwrap();
-    let mut i = 0;
-    for (mut position, mut velocity, mut acceleration, mut remainder, collider, body_type) in stuff.q0_mut().iter_mut() {
-        
+    for (mut position, mut velocity, mut acceleration, mut remainder, collider, body_type, body_params) in stuff.q0_mut().iter_mut() {
         if *body_type == BodyType::Actor {
+            let added_velocity = acceleration.0 * time.delta_seconds();
+            let clamped_movement = if body_params.max_speed.is_some() {
+                (added_velocity + velocity.0).clamp(-body_params.max_speed.unwrap(), body_params.max_speed.unwrap())
+            } else {
+                added_velocity + velocity.0
+            };
+            let move_amount = clamped_movement * time.delta_seconds();
             let start_position = position.0;
-            move_x(
-                &mut position, 
-                &mut velocity, 
-                &mut remainder, 
-                collider, 
-                &solid_colliders, 
-                &time
-            );
+            move_x(&move_amount.x, &mut position, &mut remainder, collider, &solid_colliders);
+            move_y(&move_amount.y, &mut position, &mut remainder, collider, &solid_colliders);
 
-            move_y(
-                &mut position, 
-                &mut velocity, 
-                &mut remainder, 
-                collider, 
-                &solid_colliders, 
-                &time
-            );
-
-            velocity.1 = position.0 - start_position;
-            println!("Vel({:?}), Actual({:?})", velocity.0 * time.delta_seconds(), velocity.1);
+            velocity.0 = (position.0 - start_position) / time.delta_seconds();
+            acceleration.0 = Vec2::ZERO;
         }
     }
+}
+
+fn debug_body_information(
+    mut egui_ctx: ResMut<EguiContext>,
+    body_query: Query<(&Position, &Velocity, &Acceleration, &Remainder, &AABB, &BodyType)>,
+) {
+    Window::new("Bodies").scroll(true).show(egui_ctx.ctx(), |ui| {
+        ui.collapsing("Actors", |ui| {
+            let mut i = 0u32;
+            for (pos, vel, accel, remain, aabb, _) in body_query.iter().filter(|(_, _, _, _, _, body_type)| { return **body_type == BodyType::Actor; }) {
+                ui.collapsing(format!("Actor {}", i), |ui| {
+                    ui.label(format!("Position: {:?}", pos));
+                    ui.label(format!("Velocity: {:?}", vel));
+                    ui.label(format!("Acceleration: {:?}", accel));
+                    ui.label(format!("Remainder: {:?}", remain));
+                    ui.label(format!("AABB: {:?}", aabb));
+                });
+                i += 1;
+            }
+        });
+
+        ui.separator();
+
+        ui.collapsing("Solids", |ui| {
+            for (pos, vel, accel, remain, aabb, _) in body_query.iter().filter(|(_, _, _, _, _, body_type)| { return **body_type == BodyType::Solid; }) {
+                ui.label(format!("Position: {:?}", pos));
+                ui.label(format!("Velocity: {:?}", vel));
+                ui.label(format!("Acceleration: {:?}", accel));
+                ui.label(format!("Remainder: {:?}", remain));
+                ui.label(format!("AABB: {:?}", aabb));
+            }
+        });
+    });
 }
 
 fn debug_aabb(
@@ -155,11 +169,12 @@ fn debug_aabb(
     }
 }
 
-pub struct DebugAABBPlugin;
+pub struct DebugPhysicsPlugin;
 
-impl Plugin for DebugAABBPlugin {
+impl Plugin for DebugPhysicsPlugin {
     fn build(&self, app: &mut bevy::prelude::AppBuilder) {
         app.add_system(debug_aabb.system());
+        app.add_system_to_stage(PhysicsStages::PreStep, debug_body_information.system());
     }
 }
 
@@ -170,20 +185,31 @@ pub enum PhysicsStages {
     PostStep
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone, SystemLabel)]
+pub enum StepSystemLabels {
+    Integrate,
+    MoveActors
+}
+
 pub struct PhysicsPlugin;
 
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut bevy::prelude::AppBuilder) {
-        app
-        .add_stage_before(
-            CoreStage::Update, 
-            PhysicsStages::Step, 
-            SystemStage::parallel()
+
+        // Step stages
+        app.add_stage_before(
+            CoreStage::Update,
+             PhysicsStages::Step, 
+             SystemStage::parallel()
             // .with_run_criteria(
             //     FixedTimestep::step(1.0 / 60.0).with_label("FIXED_TIME_STEP")
             // )
-            .with_system(move_actor.system().label("MOVE_ACTORS")))
-            .add_stage_before(PhysicsStages::Step, PhysicsStages::PreStep, SystemStage::parallel())
+            .with_system(
+                move_actor.system().label(StepSystemLabels::MoveActors)
+            ));
+
+        // Pre and post stages
+        app.add_stage_before(PhysicsStages::Step, PhysicsStages::PreStep, SystemStage::parallel())
             .add_stage_after(PhysicsStages::Step, PhysicsStages::PostStep, SystemStage::parallel().with_system(apply_body_position_to_transform.system()));
     }
 }  
