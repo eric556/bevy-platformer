@@ -4,7 +4,7 @@ use bevy_canvas::{
     Canvas, DrawMode,
 };
 
-use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{PhysicsStages, body::{Acceleration, BodyBundle, Velocity}, collision::AABB}};
+use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{PhysicsStages, StepSystemLabels, body::{Acceleration, BodyBundle, BodyParams, BodyType, Position, Remainder, Velocity}, collision::AABB}};
 use macros::animation_graph;
 
 animation_graph!(
@@ -112,66 +112,27 @@ fn update_player_animation(
     }
 }
 
-// fn update_player_grounded(
-//     query_pipeline: Res<QueryPipeline>,
-//     collider_query: QueryPipelineColliderComponentsQuery,
-//     rapier_params: Res<RapierConfiguration>,
-//     mut canvas: ResMut<Canvas>,
-//     mut player_query: Query<(&ColliderPosition, &ColliderShape, &mut PlayerState)>,
-// ) {
-//     let collider_set = QueryPipelineColliderComponentsSet(&collider_query);
+fn integrate_movement(
+    time: Res<Time>,
+    mut body_query: Query<(&mut Velocity, &mut Acceleration, &BodyParams)>
+) {
+    for (mut velocity, mut acceleration, body_params) in body_query.iter_mut() {
+        let added_velocity = acceleration.0 * time.delta_seconds();
+        let temp_velocity = if velocity.0.x.signum() == added_velocity.x.signum() || added_velocity.x == 0.0f32 {
+            added_velocity + velocity.0
+        } else {
+            Vec2::new(added_velocity.x, added_velocity.y + velocity.0.y)
+        };
+        let clamped_movement = if body_params.max_speed.is_some() {
+            temp_velocity.clamp(-body_params.max_speed.unwrap(), body_params.max_speed.unwrap())
+        } else {
+            temp_velocity
+        };
 
-//     for (col_pos, col_shape, mut state) in player_query.iter_mut() {
-//         let bounds = col_shape.compute_aabb(&col_pos.0);
-//         let bounds_half_extents: Vec2 = bounds.half_extents().into();
-//         let collider_position = Vec2::from(col_pos.translation);
-//         // same width, half the hight of the bounding boxs
-//         let shape_down_up_width_adjust = 0.1 * bounds_half_extents.x;
-//         let shape_down_up = Cuboid::new(
-//             Vec2::new(
-//                 bounds_half_extents.x - shape_down_up_width_adjust,
-//                 bounds_half_extents.y / 4.0,
-//             )
-//             .into(),
-//         );
-//         let shape_down_pos = [
-//             collider_position.x,
-//             collider_position.y - (bounds_half_extents.y),
-//         ]
-//         .into();
-//         let shape_vel = Vec2::new(0.0, -0.01).into();
-//         let max_toi = 4.0;
-//         let groups = InteractionGroups::new(SHAPE_CAST_GROUP, GROUND_GROUP);
-//         let filter = None;
-
-//         if let Some((handle, hit)) = query_pipeline.cast_shape(
-//             &collider_set,
-//             &shape_down_pos,
-//             &shape_vel,
-//             &shape_down_up,
-//             max_toi,
-//             groups,
-//             filter,
-//         ) {
-//             // The first collider hit has the handle `handle`. The `hit` is a
-//             // structure containing details about the hit configuration.
-//             // println!("Hit the entity with the configuration: {:?}", hit);
-//             state.grounded = true;
-//         } else {
-//             state.grounded = false;
-//         }
-
-//         canvas.draw(
-//             &Rectangle {
-//                 origin: Vec2::from(shape_down_pos.translation) * rapier_params.scale,
-//                 extents: Vec2::from(shape_down_up.half_extents) * rapier_params.scale * 2.0,
-//                 anchor_point: common_shapes::RectangleAnchor::Center,
-//             },
-//             DrawMode::stroke_1px(),
-//             Color::BLUE,
-//         );
-//     }
-// }
+        velocity.0 = clamped_movement;
+        acceleration.0 = Vec2::ZERO;
+    }
+}
 
 fn move_player(
     keys: Res<Input<KeyCode>>,
@@ -186,25 +147,14 @@ fn move_player(
     for (p_input, player_stats, state, mut vel, mut accel) in
         player_query.iter_mut()
     {
-        let prev_vel_sign = vel.0.x.signum();
-
         if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right))
             || (keys.pressed(p_input.left) && keys.pressed(p_input.right))
         {
-            // vel.velocity.x = 0.0;
-            // accel.0.x = 0.0;
+            vel.0.x = 0.0;
         } else if keys.pressed(p_input.left) {
-            // if prev_vel_sign > 0.0 {
-            //     vel.velocity.x = 0.0;
-            // }
             accel.0.x += -player_stats.speed_up;
-            // vel.0.x = vel.0.x.max(-player_stats.max_run_speed);
         } else if keys.pressed(p_input.right) {
-            // if prev_vel_sign < 0.0 {
-            //     vel.velocity.x = 0.0;
-            // }
             accel.0.x += player_stats.speed_up;
-            // vel.0.x = vel.0.x.min(player_stats.max_run_speed);
         }
 
         if keys.pressed(p_input.jump) {
@@ -222,6 +172,7 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app
             .add_system_to_stage(PhysicsStages::PreStep, move_player.system().label("MOVE_PLAYER"))
+            .add_system_to_stage(PhysicsStages::Step, integrate_movement.system().before(StepSystemLabels::MoveActors))
             .add_system(update_player_animation.system().after("player_animation_update"))
             .add_system(Player::player_animation_update.system().label("player_animation_update"));
     }

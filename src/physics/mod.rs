@@ -104,13 +104,7 @@ fn move_actor(
     // let dt = fixed_timesteps.get("FIXED_TIME_STEP").unwrap();
     for (mut position, mut velocity, mut acceleration, mut remainder, collider, body_type, body_params) in stuff.q0_mut().iter_mut() {
         if *body_type == BodyType::Actor {
-            let added_velocity = acceleration.0 * time.delta_seconds();
-            let clamped_movement = if body_params.max_speed.is_some() {
-                (added_velocity + velocity.0).clamp(-body_params.max_speed.unwrap(), body_params.max_speed.unwrap())
-            } else {
-                added_velocity + velocity.0
-            };
-            let move_amount = clamped_movement * time.delta_seconds();
+            let move_amount = velocity.0 * time.delta_seconds();
             let start_position = position.0;
             move_x(&move_amount.x, &mut position, &mut remainder, collider, &solid_colliders);
             move_y(&move_amount.y, &mut position, &mut remainder, collider, &solid_colliders);
