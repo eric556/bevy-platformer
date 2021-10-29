@@ -1,7 +1,7 @@
-use bevy::{core::{FixedTimestep, FixedTimesteps, Time}, math::{IVec2, Vec2}, prelude::{Color, CoreStage, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, StageLabel, SystemStage, SystemLabel, Transform}};
+use bevy::{core::{FixedTimestep, FixedTimesteps, Time}, math::{IVec2, Vec2}, prelude::{Color, Commands, CoreStage, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, StageLabel, SystemLabel, SystemStage, Transform}};
 use bevy_canvas::{Canvas, DrawMode, common_shapes::{Rectangle, RectangleAnchor}};
 use bevy_egui::{EguiContext, egui::Window};
-use self::{body::{Acceleration, BodyParams, BodyType, Position, Remainder, Velocity}, collision::{AABB, Intersection}};
+use self::{body::{Acceleration, BodyBundle, BodyType, Position, Remainder, Velocity}, collision::{AABB, Collision, CollisionResult, Intersection, check_for_collision}};
 
 pub mod collision;
 pub mod body;
@@ -15,31 +15,13 @@ fn apply_body_position_to_transform(
     }
 }
 
-fn check_for_collision(
-    collider: &AABB,
-    position: &Position,
-    colliders: &Vec<(Position, AABB)>
-) -> bool{
-
-    for (other_position, other_collider) in colliders.iter() {
-        let current_ent_pos = IVec2::new(position.0.x.round() as i32, position.0.y.round() as i32);
-        let other_ent_pos = IVec2::new(other_position.0.x.round() as i32, other_position.0.y.round() as i32);
-
-        if AABB::interescts(&collider.adjusted_position(&current_ent_pos), &other_collider.adjusted_position(&other_ent_pos)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 fn move_x(
     move_amount: &f32,
     position: &mut Position, 
     remainder: &mut Remainder, 
     collider: &AABB,
-    solid_colliders: &Vec<(Position, AABB)>,
-) {
+    solid_colliders: &Vec<(Vec2, AABB)>,
+) -> Option<Collision> {
     remainder.0.x += move_amount;
     let mut movement: i32 = remainder.0.x.round() as i32;
 
@@ -48,15 +30,17 @@ fn move_x(
         let sign = movement.signum();
         while movement != 0i32 {
             let next = Position(position.0 + Vec2::new(sign as f32, 0.0));
-            if !check_for_collision( &collider, &next, &solid_colliders) {
+            if let Some(collision) = check_for_collision( &collider, &next.0, &solid_colliders) {
+                // STOP WE HIT SOMETHING
+                return Some(collision);
+            } else {
                 position.0.x += sign as f32;
                 movement -= sign;
-            } else {
-                // STOP WE HIT SOMETHING
-                break;  
             }
         }
     }
+
+    None
 }
 
 fn move_y(
@@ -64,8 +48,8 @@ fn move_y(
     position: &mut Position, 
     remainder: &mut Remainder, 
     collider: &AABB,
-    solid_colliders: &Vec<(Position, AABB)>,
-) {
+    solid_colliders: &Vec<(Vec2, AABB)>,
+) -> Option<Collision> {
     // println!("Remainder {:?}", remainder);
     remainder.0.y += move_amount;
     let mut movement: i32 = remainder.0.y.round() as i32;
@@ -75,40 +59,44 @@ fn move_y(
         let sign = movement.signum();
         while movement != 0i32 {
             let next = Position(position.0 + Vec2::new(0.0, sign as f32));
-            if !check_for_collision(&collider, &next , &solid_colliders) {
+            if let Some(collision) = check_for_collision(&collider, &next.0 , &solid_colliders) {
+                // STOP WE HIT SOMETHING
+                return Some(collision);
+            } else {
                 position.0.y += sign as f32;
                 movement -= sign;
-            } else {
-                // STOP WE HIT SOMETHING
-                break;  
             }
         }
-
-        // velocity.0 = Vec2::ZERO;
     }
+
+    None
 }
 
 fn move_actor(
+    mut commands: Commands,
     time: Res<Time>,
     mut stuff: QuerySet<(
-        Query<(&mut Position, &mut Velocity, &mut Acceleration, &mut Remainder, &AABB, &BodyType, &BodyParams)>,
+        Query<(Entity, &mut Position, &mut Velocity, &mut Acceleration, &mut Remainder, &AABB, &BodyType)>,
         Query<(&Position, &AABB, &BodyType)>
     )>
 ) {
-    let solid_colliders: Vec<(Position, AABB)> = stuff.q1().iter().filter(|(_, _, body_type)| {
+    let solid_colliders: Vec<(Vec2, AABB)> = stuff.q1().iter().filter(|(_, _, body_type)| {
         **body_type == BodyType::Solid
     }).map(|(position, aabb, _)| {
-        (*position, *aabb)
+        (position.0, *aabb)
     }).collect();
 
     // let dt = fixed_timesteps.get("FIXED_TIME_STEP").unwrap();
-    for (mut position, mut velocity, mut acceleration, mut remainder, collider, body_type, body_params) in stuff.q0_mut().iter_mut() {
+    for (entity, mut position, mut velocity, mut acceleration, mut remainder, collider, body_type) in stuff.q0_mut().iter_mut() {
         if *body_type == BodyType::Actor {
             let move_amount = velocity.0 * time.delta_seconds();
             let start_position = position.0;
-            move_x(&move_amount.x, &mut position, &mut remainder, collider, &solid_colliders);
-            move_y(&move_amount.y, &mut position, &mut remainder, collider, &solid_colliders);
-
+            let x_collision = move_x(&move_amount.x, &mut position, &mut remainder, collider, &solid_colliders);
+            let y_collision = move_y(&move_amount.y, &mut position, &mut remainder, collider, &solid_colliders);
+            commands.entity(entity).insert(CollisionResult {
+                x_collision_body: x_collision,
+                y_collision_body: y_collision,
+            });
             velocity.0 = (position.0 - start_position) / time.delta_seconds();
             acceleration.0 = Vec2::ZERO;
         }

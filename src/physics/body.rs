@@ -12,11 +12,6 @@ pub struct Acceleration(pub Vec2, pub Vec2);
 #[derive(Default, Debug)]
 pub struct Remainder(pub Vec2);
 
-#[derive(Default, Debug)]
-pub struct BodyParams {
-    pub max_speed: Option<Vec2> 
-}
-
 #[derive(PartialEq, Debug)]
 pub enum BodyType {
     Actor,
@@ -32,9 +27,7 @@ impl Default for BodyType {
 #[derive(Bundle, Default, Debug)]
 pub struct BodyBundle {
     pub body_type: BodyType,
-    pub position: Position,
     pub velocity: Velocity,
-    pub acceleration: Acceleration,
+    pub position: Position,
     pub remainder: Remainder,
-    pub body_params: BodyParams
 }

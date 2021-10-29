@@ -1,5 +1,5 @@
 use core::panic;
-use std::collections::HashMap;
+use std::{collections::HashMap, default};
 
 use animation::{AnimationPlugin, Col, Row, SpriteSheetDefinition};
 use bevy::{math::Vec3Swizzles, prelude::*};
@@ -7,13 +7,13 @@ use bevy_egui::EguiPlugin;
 use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
 use fastapprox::fast::ln;
 use ldtk_rust::{Project, TileInstance};
-use physics::{DebugPhysicsPlugin, PhysicsPlugin, body::{BodyParams, Velocity}};
-use player::PlayerPlugin;
+use physics::{DebugPhysicsPlugin, PhysicsPlugin, body::{Velocity}};
+use player::{PlayerJumpParams, PlayerPlugin, PlayerWalkParams};
 
 use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, camera::{CameraPlugin, CameraTarget, MainCamera}, physics::{
         body::{BodyBundle, BodyType, Position},
         collision::AABB,
-    }, player::{Health, PlayerBundle, PlayerStats}};
+    }, player::{Health, PlayerBundle}};
 
 pub mod animation;
 pub mod physics;
@@ -178,9 +178,6 @@ fn spawn_player(
         body_bundle: BodyBundle {
             body_type: BodyType::Actor,
             position: Position(position),
-            body_params: BodyParams {
-                max_speed: Some(Vec2::new(1000f32, 1000f32))
-            },
             ..Default::default()
         },
         collider: AABB {
@@ -210,9 +207,18 @@ fn spawn_player(
             current_row: Row(5), // Set it up as the idle animation right away
             current_col: Col(0),
         },
-        player_stats: PlayerStats {
-            max_run_speed: 200.0,
-            speed_up: 9000.0,
+        player_walk_params: PlayerWalkParams {
+            walk_accel: 6000f32,
+            max_walk_speed: 360f32,
+            ..Default::default()
+        },
+        player_jump_params: PlayerJumpParams {
+            gravity: Vec2::new(0f32, -1000f32),
+            rising_gravity: Vec2::new(0f32, -1000f32),
+            jump_acceleration: 7000f32,
+            max_jump_duration: 0.1f32,
+            max_fall_speed: -360f32,
+            jump_timer: Timer::from_seconds(0.1, false),
         },
         ..Default::default()
     })
@@ -414,7 +420,12 @@ fn update_ldtk_map(
 fn main() {
     let mut app = App::build();
     // Resources
-    app.insert_resource(Scale(4.0));
+    app.insert_resource(Scale(4.0))
+        .insert_resource(WindowDescriptor {
+            width: 1920.0,
+            height: 1080.0,
+            ..Default::default()
+        });
 
     // Plugins
     app.add_plugins(DefaultPlugins)
