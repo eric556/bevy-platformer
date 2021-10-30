@@ -36,7 +36,8 @@ animation_graph!(
     {keys: bevy::prelude::Res<bevy::input::Input<bevy::prelude::KeyCode>>},
     {vel: crate::physics::body::Velocity, p_input: crate::player::PlayerInput, jump_params: crate::player::PlayerJumpParams},
     Grounded {
-        Jumping -> keys.pressed(p_input.jump) == true
+        Jumping -> keys.pressed(p_input.jump) == true,
+        Falling -> vel.0.y < 0.0
     },
     Jumping {
         Falling -> vel.0.y <= 0.0 || keys.just_released(p_input.jump) == true,
@@ -204,6 +205,35 @@ fn check_grounded(
     }
 }
 
+// TODO add in a system that watches for jump state change, this will need to go after the grounded check I think
+fn jump_state(
+    time: Res<Time>,
+    mut jump_state_query: Query<(Entity, &mut Acceleration, &mut JumpStateGraph::JumpStateGraphAnimationUpdate,  &mut PlayerJumpParams)>
+) {
+    for (entity, mut acceleration, mut jump_state, mut player_jump_params) in jump_state_query.iter_mut() {
+        match *jump_state {
+            JumpStateGraph::JumpStateGraphAnimationUpdate::Grounded => {
+                if player_jump_params.jump_timer.elapsed_secs() > 0.0 {
+                    player_jump_params.jump_timer.reset();
+                    println!("Reseting");
+                }
+            },
+            JumpStateGraph::JumpStateGraphAnimationUpdate::Jumping => {
+                player_jump_params.jump_timer.tick(time.delta());
+                acceleration.0.y += player_jump_params.jump_acceleration;
+                println!("Ticking");
+            },
+            JumpStateGraph::JumpStateGraphAnimationUpdate::Rising => {
+
+            },
+            JumpStateGraph::JumpStateGraphAnimationUpdate::Falling => {
+                
+            },
+        }
+    }
+}
+
+
 fn move_player(
     keys: Res<Input<KeyCode>>,
     mut player_query: Query<(
@@ -226,12 +256,12 @@ fn move_player(
             accel.0.x += player_walk_params.walk_accel;
         }
 
-        if keys.pressed(p_input.jump) {
-            accel.0.y += player_walk_params.walk_accel;
-        }
-        else if keys.pressed(KeyCode::S) {
-            accel.0.y += -player_walk_params.walk_accel;
-        }
+        // if keys.pressed(p_input.jump) {
+        //     accel.0.y += player_walk_params.walk_accel;
+        // }
+        // else if keys.pressed(KeyCode::S) {
+        //     accel.0.y += -player_walk_params.walk_accel;
+        // }
     }
 }
 
@@ -260,7 +290,9 @@ impl Plugin for PlayerPlugin {
             .add_system_to_stage(PhysicsStages::Step, integrate_movement.system().label("INTEGRATE_PLAYER").before(StepSystemLabels::MoveActors))
             .add_system_to_stage(PhysicsStages::Step, debug_jump_state.system().before("INTEGRATE_PLAYER"))
             .add_system_to_stage(PhysicsStages::PostStep, check_grounded.system().label("GROUND_CHECK"))
-            .add_system_to_stage(PhysicsStages::PostStep, JumpStateGraph::jumpstategraph_animation_update.system().after("GROUND_CHECK"))
+            .add_system_to_stage(PhysicsStages::PostStep, JumpStateGraph::jumpstategraph_animation_update.system().label("JUMP_STATE_GRAPH").after("GROUND_CHECK"))
+            .add_system_to_stage(PhysicsStages::PostStep, jump_state.system().after("JUMP_STATE_GRAPH"))
+
             .add_system(update_player_animation.system().after("player_animation_update"))
             .add_system(Player::player_animation_update.system().label("player_animation_update"));
     }

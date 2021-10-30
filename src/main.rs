@@ -209,16 +209,16 @@ fn spawn_player(
         },
         player_walk_params: PlayerWalkParams {
             walk_accel: 6000f32,
-            max_walk_speed: 360f32,
+            max_walk_speed: 700f32,
             ..Default::default()
         },
         player_jump_params: PlayerJumpParams {
             gravity: Vec2::new(0f32, -1000f32),
             rising_gravity: Vec2::new(0f32, -1000f32),
             jump_acceleration: 7000f32,
-            max_jump_duration: 0.1f32,
-            max_fall_speed: -360f32,
-            jump_timer: Timer::from_seconds(0.1, false),
+            max_jump_duration: 0.08f32,
+            max_fall_speed: -700f32,
+            jump_timer: Timer::from_seconds(0.08, false),
         },
         ..Default::default()
     })
@@ -258,8 +258,8 @@ fn setup_tilemap(
 ) {
     // Load up the map
     let map = Map {
-        // ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
-        ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
+        ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
+        // ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
         redraw: true,
         current_level: 0,
     };
