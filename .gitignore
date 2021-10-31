@@ -1,4 +1,6 @@
-/target
+/target/**/*
+!/target/wasm.js
+!/target/wasm_bg.wasm
 Cargo.lock
 
 .cargo/config
