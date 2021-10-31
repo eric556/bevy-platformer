@@ -6,11 +6,11 @@ use bevy::{math::Vec3Swizzles, prelude::*};
 use bevy_egui::EguiPlugin;
 use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
 use fastapprox::fast::ln;
-use ldtk_rust::{Project, TileInstance};
+use ldtk::ldtk_json::{Project, TileInstance};
 use physics::{DebugPhysicsPlugin, PhysicsPlugin, body::{Velocity}};
 use player::{PlayerJumpParams, PlayerPlugin, PlayerWalkParams};
 
-use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, camera::{CameraPlugin, CameraTarget, MainCamera}, physics::{
+use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, camera::{CameraPlugin, CameraTarget, MainCamera}, ldtk::LdtkLoaderPlugin, physics::{
         body::{BodyBundle, BodyType, Position},
         collision::AABB,
     }, player::{Health, PlayerBundle}};
@@ -19,14 +19,21 @@ pub mod animation;
 pub mod physics;
 pub mod player;
 pub mod camera;
+pub mod ldtk;
 
 #[derive(Clone)]
 struct LdtkMapAssets(HashMap<i32, Handle<TextureAtlas>>);
 
 struct Map {
-    ldtk_file: Project,
+    ldtk_file: Handle<Project>,
     redraw: bool,
     current_level: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+enum AppState {
+    Loading,
+    InGame
 }
 
 #[derive(Clone, Copy)]
@@ -213,8 +220,8 @@ fn spawn_player(
             ..Default::default()
         },
         player_jump_params: PlayerJumpParams {
-            gravity: Vec2::new(0f32, -1000f32),
-            rising_gravity: Vec2::new(0f32, -1000f32),
+            gravity: Vec2::new(0f32, -3000f32),
+            rising_gravity: Vec2::new(0f32, -3000f32),
             jump_acceleration: 7000f32,
             max_jump_duration: 0.08f32,
             max_fall_speed: -700f32,
@@ -251,45 +258,62 @@ fn setup_animation_assets(
     commands.insert_resource(player_animation_assets);
 }
 
-fn setup_tilemap(
+fn load_tilemap(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+    ldtk_maps: Res<Assets<Project>>
 ) {
     // Load up the map
     let map = Map {
-        ldtk_file: Project::new(String::from("assets/test-world.ldtk")),
+        ldtk_file: asset_server.load("test-world.ldtk"),
         // ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
         redraw: true,
         current_level: 0,
     };
 
-    // Go through and grab all the map tile sets
-    let mut map_assets = LdtkMapAssets(HashMap::new());
-    for tileset in map.ldtk_file.defs.tilesets.iter() {
-        let texture_handle = asset_server.load(&tileset.rel_path[..]);
-
-        let texture_atlas = TextureAtlas::from_grid(
-            texture_handle,
-            Vec2::new(tileset.tile_grid_size as f32, tileset.tile_grid_size as f32),
-            (tileset.px_wid / tileset.tile_grid_size) as usize,
-            (tileset.px_hei / tileset.tile_grid_size) as usize,
-        );
-        let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        map_assets
-            .0
-            .insert(tileset.uid as i32, texture_atlas_handle);
-    }
-
     // Slap these bad boys into resources
     commands.insert_resource(map);
-    commands.insert_resource(map_assets);
+}
+
+fn load_tilesets(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut texture_atlases: ResMut<Assets<TextureAtlas>>,
+    map: Res<Map>,
+    ldtk_maps: Res<Assets<Project>>,
+    mut state: ResMut<State<AppState>>
+) {
+    // Go through and grab all the map tile sets
+
+    if let Some(ldtk_file) = ldtk_maps.get(&map.ldtk_file) {
+        let mut map_assets = LdtkMapAssets(HashMap::new());
+
+        for tileset in ldtk_file.defs.tilesets.iter() {
+            let texture_handle = asset_server.load(&tileset.rel_path[..]);
+
+            let texture_atlas = TextureAtlas::from_grid(
+                texture_handle,
+                Vec2::new(tileset.tile_grid_size as f32, tileset.tile_grid_size as f32),
+                (tileset.px_wid / tileset.tile_grid_size) as usize,
+                (tileset.px_hei / tileset.tile_grid_size) as usize,
+            );
+            let texture_atlas_handle = texture_atlases.add(texture_atlas);
+            map_assets
+                .0
+                .insert(tileset.uid as i32, texture_atlas_handle);
+        }
+
+        commands.insert_resource(map_assets);
+        state.set(AppState::InGame);
+    }
+
 }
 
 fn update_ldtk_map(
     mut commands: Commands,
     mut map: ResMut<Map>,
     map_assets: Res<LdtkMapAssets>,
+    ldtk_maps: Res<Assets<Project>>,
     scale: Res<Scale>,
     player_animations: Res<PlayerAnimationsAssets>
 ) {
@@ -299,122 +323,126 @@ fn update_ldtk_map(
 
     commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera);
 
-    commands.insert_resource(ClearColor(
-        Color::hex(&map.ldtk_file.levels[0].bg_color[1..]).unwrap(),
-    ));
+    if let Some(ldtk_file) = ldtk_maps.get(&map.ldtk_file) {
+        commands.insert_resource(ClearColor(
+            Color::hex(&ldtk_file.levels[0].bg_color[1..]).unwrap(),
+        ));
 
-    for i in 0..map.ldtk_file.levels.len() {
-        let level_ldtk_world_pos = Vec2::new(
-            map.ldtk_file.levels[i].world_x as f32,
-            map.ldtk_file.levels[i].world_y as f32,
-        );
-        println!("World LDTKPos({:?})", level_ldtk_world_pos);
-        for (idx, layer) in map.ldtk_file.levels[i]
-            .layer_instances
-            .as_ref()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .rev()
-        {
-            let tileset_uid = layer.tileset_def_uid.unwrap_or(-1) as i32;
-            let layer_uid = layer.layer_def_uid as i32;
+        for i in 0..ldtk_file.levels.len() {
+            let level_ldtk_world_pos = Vec2::new(
+                ldtk_file.levels[i].world_x as f32,
+                ldtk_file.levels[i].world_y as f32,
+            );
+            println!("World LDTKPos({:?})", level_ldtk_world_pos);
+            for (idx, layer) in ldtk_file.levels[i]
+                .layer_instances
+                .as_ref()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .rev()
+            {
+                let tileset_uid = layer.tileset_def_uid.unwrap_or(-1) as i32;
+                let layer_uid = layer.layer_def_uid as i32;
 
-            let layer_info = LayerInfo {
-                grid_width: layer.c_wid as i32,
-                _grid_height: layer.c_hei as i32,
-                grid_cell_size: layer.grid_size as i32,
-                z_index: 50 - idx as i32,
-                // todo gotta swap this over from a hard coded scale
-                px_width: layer.c_wid as f32 * (layer.grid_size as f32 * scale.0),
-                px_height: layer.c_hei as f32 * (layer.grid_size as f32 * scale.0),
-            };
+                let layer_info = LayerInfo {
+                    grid_width: layer.c_wid as i32,
+                    _grid_height: layer.c_hei as i32,
+                    grid_cell_size: layer.grid_size as i32,
+                    z_index: 50 - idx as i32,
+                    // todo gotta swap this over from a hard coded scale
+                    px_width: layer.c_wid as f32 * (layer.grid_size as f32 * scale.0),
+                    px_height: layer.c_hei as f32 * (layer.grid_size as f32 * scale.0),
+                };
 
-            match &layer.layer_instance_type[..] {
-                "Tiles" => {
-                    if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
-                        println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
-                        for tile in layer.grid_tiles.iter() {
-                            spawn_tile(
-                                layer_info,
-                                tile,
-                                level_ldtk_world_pos,
-                                &mut commands,
-                                map_assets.0[&(layer_tileset_def_uid as i32)].clone(),
-                                &scale
-                            )
-                        }
-                    }
-                }
-                "AutoLayer" => {}
-                "IntGrid" => {
-                    if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
-                        println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
-                        for tile in layer.auto_layer_tiles.iter() {
-                            spawn_tile(
-                                layer_info,
-                                tile,
-                                level_ldtk_world_pos,
-                                &mut commands,
-                                map_assets.0[&(layer_tileset_def_uid as i32)].clone(),
-                                &scale
-                            )
-                        }
-                    }
-                }
-                "Entities" => {
-                    println!("Generating Entities Layer: {}", layer.identifier);
-                    match &layer.identifier[..] {
-                        "Colliders" => {
-                            for entity in layer.entity_instances.iter() {
-                                let (bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
-                                    Vec2::new(entity.px[0] as f32, entity.px[1] as f32)
-                                        + level_ldtk_world_pos,
-                                    Vec2::new(entity.width as f32, entity.height as f32),
-                                    Vec2::new(layer_info.px_width, layer_info.px_height),
-                                    scale.0,
-                                );
-
-                                println!(
-                                    "Creating collider Size({:?}) Position({:?})",
-                                    bevy_half_extent, bevy_pos
-                                );
-
-                                spawn_collider(&mut commands, bevy_pos, bevy_half_extent);
+                match &layer.layer_instance_type[..] {
+                    "Tiles" => {
+                        if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
+                            println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
+                            for tile in layer.grid_tiles.iter() {
+                                spawn_tile(
+                                    layer_info,
+                                    tile,
+                                    level_ldtk_world_pos,
+                                    &mut commands,
+                                    map_assets.0[&(layer_tileset_def_uid as i32)].clone(),
+                                    &scale
+                                )
                             }
                         }
-                        "Entities" => {
-                            for entity in layer.entity_instances.iter() {
-                                println!("Entity: {}", entity.identifier);
+                    }
+                    "AutoLayer" => {}
+                    "IntGrid" => {
+                        if let Some(layer_tileset_def_uid) = layer.tileset_def_uid {
+                            println!("Generating IntGrid Layer w/ Tiles: {}", layer.identifier);
+                            for tile in layer.auto_layer_tiles.iter() {
+                                spawn_tile(
+                                    layer_info,
+                                    tile,
+                                    level_ldtk_world_pos,
+                                    &mut commands,
+                                    map_assets.0[&(layer_tileset_def_uid as i32)].clone(),
+                                    &scale
+                                )
+                            }
+                        }
+                    }
+                    "Entities" => {
+                        println!("Generating Entities Layer: {}", layer.identifier);
+                        match &layer.identifier[..] {
+                            "Colliders" => {
+                                for entity in layer.entity_instances.iter() {
+                                    let (bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
+                                        Vec2::new(entity.px[0] as f32, entity.px[1] as f32)
+                                            + level_ldtk_world_pos,
+                                        Vec2::new(entity.width as f32, entity.height as f32),
+                                        Vec2::new(layer_info.px_width, layer_info.px_height),
+                                        scale.0,
+                                    );
 
-                                let (bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
-                                    Vec2::new(entity.px[0] as f32, entity.px[1] as f32)
-                                        + level_ldtk_world_pos,
-                                    Vec2::new(entity.width as f32, entity.height as f32),
-                                    Vec2::new(layer_info.px_width, layer_info.px_height),
-                                    scale.0,
-                                );
+                                    println!(
+                                        "Creating collider Size({:?}) Position({:?})",
+                                        bevy_half_extent, bevy_pos
+                                    );
 
-                                println!(
-                                    "Spawning at position: {:?} {:?}",
-                                    bevy_pos, bevy_half_extent
-                                );
-
-                                match &entity.identifier[..] {
-                                    "Player" => spawn_player(&mut commands, &player_animations, bevy_pos, bevy_half_extent, scale.0),
-                                    _ => {}
+                                    spawn_collider(&mut commands, bevy_pos, bevy_half_extent);
                                 }
                             }
+                            "Entities" => {
+                                for entity in layer.entity_instances.iter() {
+                                    println!("Entity: {}", entity.identifier);
+
+                                    let (bevy_pos, bevy_half_extent) = convert_ldtk_entity_to_bevy(
+                                        Vec2::new(entity.px[0] as f32, entity.px[1] as f32)
+                                            + level_ldtk_world_pos,
+                                        Vec2::new(entity.width as f32, entity.height as f32),
+                                        Vec2::new(layer_info.px_width, layer_info.px_height),
+                                        scale.0,
+                                    );
+
+                                    println!(
+                                        "Spawning at position: {:?} {:?}",
+                                        bevy_pos, bevy_half_extent
+                                    );
+
+                                    match &entity.identifier[..] {
+                                        "Player" => spawn_player(&mut commands, &player_animations, bevy_pos, bevy_half_extent, scale.0),
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
+                    _ => panic!("AHHHHHHHHH"),
                 }
-                _ => panic!("AHHHHHHHHH"),
             }
         }
-    }
+        map.redraw = false;
 
-    map.redraw = false;
+    } else {
+        map.redraw = true;
+    }
 }
 
 fn main() {
@@ -429,24 +457,34 @@ fn main() {
 
     // Plugins
     app.add_plugins(DefaultPlugins)
-        .add_plugin(bevy_canvas::CanvasPlugin)
         .add_plugin(EguiPlugin)
+        .add_plugin(LdtkLoaderPlugin)
         .add_plugin(PhysicsPlugin)
         .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
         .add_plugin(CameraPlugin)
         .add_plugin(DebugPhysicsPlugin);
+
+    // states
+    app.add_state(AppState::Loading);
+
+    // Loading state
+    app.add_system_set(SystemSet::on_enter(AppState::Loading).with_system(load_tilemap.system()));
+    app.add_system_set(SystemSet::on_update(AppState::Loading).with_system(load_tilesets.system()));
     
-    // Startup Systems
-    app.add_startup_system(setup_tilemap.system())
-        .add_startup_system(setup_animation_assets.system());
-        
-    // Systems
-    app.add_system(update_ldtk_map.system())
-        .add_system(sprite_flip.system());
+    // InGame state
+    app.add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_animation_assets.system()));
+    app.add_system_set(SystemSet::on_update(AppState::InGame).with_system(update_ldtk_map.system()));
+    app.add_system_set(SystemSet::on_update(AppState::InGame).with_system(sprite_flip.system()));
         
     // Dumping the schedule as a graphviz graph
-    println!("{}", schedule_graph_dot(&app.app.schedule));
+    // println!("{}", schedule_graph_dot(&app.app.schedule));
+
+    #[cfg(target_arch = "x86_64")]
+    app.add_plugin(bevy_canvas::CanvasPlugin);
+
+    #[cfg(target_arch = "wasm32")]
+    app.add_plugin(bevy_webgl2::WebGL2Plugin);
 
     app.run();
 }

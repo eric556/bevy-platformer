@@ -1,5 +1,8 @@
 use bevy::{core::{FixedTimestep, FixedTimesteps, Time}, math::{IVec2, Vec2}, prelude::{Color, Commands, CoreStage, Entity, IntoSystem, ParallelSystemDescriptorCoercion, Plugin, Query, QuerySet, Res, ResMut, StageLabel, SystemLabel, SystemStage, Transform}};
+
+#[cfg(target_arch = "x86_64")]
 use bevy_canvas::{Canvas, DrawMode, common_shapes::{Rectangle, RectangleAnchor}};
+
 use bevy_egui::{EguiContext, egui::Window};
 use self::{body::{Acceleration, BodyBundle, BodyType, Position, Remainder, Velocity}, collision::{AABB, Collision, CollisionResult, Intersection, check_for_collision}};
 
@@ -136,6 +139,7 @@ fn debug_body_information(
     });
 }
 
+#[cfg(target_arch = "x86_64")]
 fn debug_aabb(
     mut canvas: ResMut<Canvas>,
     aabb_qery: Query<(&Position, &AABB, &BodyType)>,
@@ -155,6 +159,7 @@ pub struct DebugPhysicsPlugin;
 
 impl Plugin for DebugPhysicsPlugin {
     fn build(&self, app: &mut bevy::prelude::AppBuilder) {
+        #[cfg(target_arch = "x86_64")]
         app.add_system(debug_aabb.system());
         app.add_system_to_stage(PhysicsStages::PreStep, debug_body_information.system());
     }

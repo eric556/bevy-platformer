@@ -1,8 +1,11 @@
 use bevy::{prelude::*, sprite::collide_aabb::Collision};
+
+#[cfg(target_arch = "x86_64")]
 use bevy_canvas::{
     common_shapes::{self, Rectangle},
     Canvas, DrawMode,
 };
+
 use bevy_egui::{EguiContext, egui::Window};
 
 use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{PhysicsStages, StepSystemLabels, body::{Acceleration, BodyBundle, Velocity}, collision::{AABB, CollisionResult}}};
@@ -31,28 +34,11 @@ animation_graph!(
 	}
 );
 
-animation_graph!(
-    JumpStateGraph,
-    {keys: bevy::prelude::Res<bevy::input::Input<bevy::prelude::KeyCode>>},
-    {vel: crate::physics::body::Velocity, p_input: crate::player::PlayerInput, jump_params: crate::player::PlayerJumpParams},
-    Grounded {
-        Jumping -> keys.pressed(p_input.jump) == true,
-        Falling -> vel.0.y < 0.0
-    },
-    Jumping {
-        Falling -> vel.0.y <= 0.0 || keys.just_released(p_input.jump) == true,
-        Rising -> jump_params.jump_timer.finished() == true
-    },
-    Rising {
-        Falling -> vel.0.y <= 0.0
-    },
-    Falling {}  // The transition to grounded will be handled elsewhere
-);
-
-impl Default for JumpStateGraph::JumpStateGraphAnimationUpdate {
-    fn default() -> Self {
-        Self::Falling
-    }
+pub enum JumpState {
+    Grounded,
+    Jumping,
+    Rising,
+    Falling
 }
 
 
@@ -109,7 +95,6 @@ pub struct PlayerBundle {
     pub animation: AnimatedSpriteBundle,
     pub input: PlayerInput,
     pub action: Player::PlayerAnimationUpdate,
-    pub jump_state: JumpStateGraph::JumpStateGraphAnimationUpdate,
     pub player_walk_params: PlayerWalkParams,
     pub player_jump_params: PlayerJumpParams,
     pub acceleration: Acceleration
@@ -167,72 +152,14 @@ fn integrate_movement(
     }
 }
 
-fn gravity(
-    mut body_query: Query<(&mut Acceleration, &PlayerJumpParams, &JumpStateGraph::JumpStateGraphAnimationUpdate)>
-) {
-    for (mut accel, player_jump_params, jump_state) in body_query.iter_mut() {
-        match jump_state {
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Jumping => {
-                // No gravity when jumping
-            },
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Rising => {
-                accel.0 += player_jump_params.rising_gravity;
-            },
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Grounded | 
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Falling => {
-                accel.0 += player_jump_params.gravity;
-            },
-        }
-    }
-}
-
-fn check_grounded(
+fn collision_check(
     mut commands: Commands,
-    mut jump_state_query: Query<(Entity, &mut JumpStateGraph::JumpStateGraphAnimationUpdate, &CollisionResult), Added<CollisionResult>>
+    mut jump_state_query: Query<(Entity, &CollisionResult), Added<CollisionResult>>
 ) {
-    for (entity, mut jump_state, collision_result) in jump_state_query.iter_mut() {
-
-        match *jump_state {
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Falling => {
-                if collision_result.y_collision_body.is_some() {
-                    *jump_state = JumpStateGraph::JumpStateGraphAnimationUpdate::Grounded;
-                }
-            },
-            _ => {}
-        }
-
+    for (entity, collision_result) in jump_state_query.iter_mut() {
         commands.entity(entity).remove::<CollisionResult>();
     }
 }
-
-// TODO add in a system that watches for jump state change, this will need to go after the grounded check I think
-fn jump_state(
-    time: Res<Time>,
-    mut jump_state_query: Query<(Entity, &mut Acceleration, &mut JumpStateGraph::JumpStateGraphAnimationUpdate,  &mut PlayerJumpParams)>
-) {
-    for (entity, mut acceleration, mut jump_state, mut player_jump_params) in jump_state_query.iter_mut() {
-        match *jump_state {
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Grounded => {
-                if player_jump_params.jump_timer.elapsed_secs() > 0.0 {
-                    player_jump_params.jump_timer.reset();
-                    println!("Reseting");
-                }
-            },
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Jumping => {
-                player_jump_params.jump_timer.tick(time.delta());
-                acceleration.0.y += player_jump_params.jump_acceleration;
-                println!("Ticking");
-            },
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Rising => {
-
-            },
-            JumpStateGraph::JumpStateGraphAnimationUpdate::Falling => {
-                
-            },
-        }
-    }
-}
-
 
 fn move_player(
     keys: Res<Input<KeyCode>>,
@@ -265,33 +192,14 @@ fn move_player(
     }
 }
 
-fn debug_jump_state (
-    mut egui_ctx: ResMut<EguiContext>,
-    jump_state_query: Query<&JumpStateGraph::JumpStateGraphAnimationUpdate>
-) {
-    Window::new("Jump States").scroll(true).show(egui_ctx.ctx(), |ui| {
-        let mut i = 0u32;
-        for jump_state in jump_state_query.iter() {
-            ui.collapsing(format!("Jump State {}", i), |ui| {
-                ui.label(format!("State: {:?}", jump_state));
-            });
-            i += 1;
-        }
-    });
-}
-
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app
             .add_system_to_stage(PhysicsStages::PreStep, move_player.system().label("MOVE_PLAYER"))
-            .add_system_to_stage(PhysicsStages::PreStep, gravity.system().after("MOVE_PLAYER"))
             .add_system_to_stage(PhysicsStages::Step, integrate_movement.system().label("INTEGRATE_PLAYER").before(StepSystemLabels::MoveActors))
-            .add_system_to_stage(PhysicsStages::Step, debug_jump_state.system().before("INTEGRATE_PLAYER"))
-            .add_system_to_stage(PhysicsStages::PostStep, check_grounded.system().label("GROUND_CHECK"))
-            .add_system_to_stage(PhysicsStages::PostStep, JumpStateGraph::jumpstategraph_animation_update.system().label("JUMP_STATE_GRAPH").after("GROUND_CHECK"))
-            .add_system_to_stage(PhysicsStages::PostStep, jump_state.system().after("JUMP_STATE_GRAPH"))
+            .add_system_to_stage(PhysicsStages::PostStep, collision_check.system().label("COLLISION_CHECK"))
 
             .add_system(update_player_animation.system().after("player_animation_update"))
             .add_system(Player::player_animation_update.system().label("player_animation_update"));
