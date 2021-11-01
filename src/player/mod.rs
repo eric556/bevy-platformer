@@ -156,7 +156,7 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
         app
             .add_system_to_stage(PhysicsStages::PreStep, move_player.system().label("MOVE_PLAYER"))
-            .add_system_to_stage(PhysicsStages::Step, gravity.system().after("MOVE_PLAYER"))
+            .add_system_to_stage(PhysicsStages::PreStep, gravity.system().after("MOVE_PLAYER"))
             .add_system_to_stage(PhysicsStages::Step, integrate_movement.system().label("INTEGRATE_PLAYER").before(StepSystemLabels::MoveActors))
             .add_system_to_stage(PhysicsStages::PostStep, collision_check.system().label("COLLISION_CHECK"))
 

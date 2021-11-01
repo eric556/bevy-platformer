@@ -78,6 +78,7 @@ fn move_y(
 fn move_actor(
     mut commands: Commands,
     time: Res<Time>,
+    fixed_timesteps: Res<FixedTimesteps>,
     mut stuff: QuerySet<(
         Query<(Entity, &mut Position, &mut Velocity, &mut Acceleration, &mut Remainder, &AABB, &BodyType)>,
         Query<(&Position, &AABB, &BodyType)>
@@ -89,7 +90,6 @@ fn move_actor(
         (position.0, *aabb)
     }).collect();
 
-    // let dt = fixed_timesteps.get("FIXED_TIME_STEP").unwrap();
     for (entity, mut position, mut velocity, mut acceleration, mut remainder, collider, body_type) in stuff.q0_mut().iter_mut() {
         if *body_type == BodyType::Actor {
             let move_amount = velocity.0 * time.delta_seconds();

@@ -2,7 +2,7 @@ use core::panic;
 use std::{collections::HashMap, default};
 
 use animation::{AnimationPlugin, Col, Row, SpriteSheetDefinition};
-use bevy::{math::Vec3Swizzles, prelude::*};
+use bevy::{math::Vec3Swizzles, prelude::*, reflect::GetPath};
 use bevy_egui::EguiPlugin;
 use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
 use fastapprox::fast::ln;
@@ -26,6 +26,7 @@ struct LdtkMapAssets(HashMap<i32, Handle<TextureAtlas>>);
 
 struct Map {
     ldtk_file: Handle<Project>,
+    path: String,
     redraw: bool,
     current_level: usize,
 }
@@ -262,10 +263,14 @@ fn load_tilemap(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
+    asset_server.watch_for_changes().unwrap();
+
+    // let handles = asset_server.load_folder("maps");
     // Load up the map
     let map = Map {
-        // ldtk_file: asset_server.load("test-world.ldtk"),
-        ldtk_file: asset_server.load("physics-testing.ldtk"),
+        ldtk_file: asset_server.load("maps/test-world2.ldtk"),
+        // ldtk_file: asset_server.load("maps/test-world-2.ldtk"),
+        path: String::from("maps/"),
         redraw: true,
         current_level: 0,
     };
@@ -288,7 +293,8 @@ fn load_tilesets(
         let mut map_assets = LdtkMapAssets(HashMap::new());
 
         for tileset in ldtk_file.defs.tilesets.iter() {
-            let texture_handle = asset_server.load(&tileset.rel_path[..]);
+            let path_to_asset: &str = &format!("{}{}", map.path, &tileset.rel_path[..]);
+            let texture_handle = asset_server.load(path_to_asset);
 
             let texture_atlas = TextureAtlas::from_grid(
                 texture_handle,
