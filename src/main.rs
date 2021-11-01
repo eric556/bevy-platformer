@@ -8,7 +8,7 @@ use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
 use fastapprox::fast::ln;
 use ldtk::ldtk_json::{Project, TileInstance};
 use physics::{DebugPhysicsPlugin, PhysicsPlugin, body::{Velocity}};
-use player::{PlayerJumpParams, PlayerPlugin, PlayerWalkParams};
+use player::{PlayerDebugPlugin, PlayerPlugin, player_physics::{PlayerJumpParams, PlayerWalkParams}};
 
 use crate::{animation::{AnimatedSpriteBundle, AnimationDefinition}, camera::{CameraPlugin, CameraTarget, MainCamera}, ldtk::LdtkLoaderPlugin, physics::{
         body::{BodyBundle, BodyType, Position},
@@ -221,11 +221,11 @@ fn spawn_player(
         },
         player_jump_params: PlayerJumpParams {
             gravity: Vec2::new(0f32, -3000f32),
-            rising_gravity: Vec2::new(0f32, -3000f32),
             jump_acceleration: 7000f32,
-            max_jump_duration: 0.08f32,
+            max_jump_duration: 0.2f32,
             max_fall_speed: -700f32,
-            jump_timer: Timer::from_seconds(0.08, false),
+            jump_timer: Timer::from_seconds(0.2, false),
+            ..Default::default()
         },
         ..Default::default()
     })
@@ -261,17 +261,16 @@ fn setup_animation_assets(
 fn load_tilemap(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    ldtk_maps: Res<Assets<Project>>
 ) {
     // Load up the map
     let map = Map {
-        ldtk_file: asset_server.load("test-world.ldtk"),
-        // ldtk_file: Project::new(String::from("assets/physics-testing.ldtk")),
+        // ldtk_file: asset_server.load("test-world.ldtk"),
+        ldtk_file: asset_server.load("physics-testing.ldtk"),
         redraw: true,
         current_level: 0,
     };
 
-    // Slap these bad boys into resources
+    // Slap this bad boy into a resource
     commands.insert_resource(map);
 }
 
@@ -463,7 +462,8 @@ fn main() {
         .add_plugin(AnimationPlugin)
         .add_plugin(PlayerPlugin)
         .add_plugin(CameraPlugin)
-        .add_plugin(DebugPhysicsPlugin);
+        .add_plugin(DebugPhysicsPlugin)
+        ;
 
     // states
     app.add_state(AppState::Loading);
@@ -485,6 +485,8 @@ fn main() {
 
     #[cfg(target_arch = "wasm32")]
     app.add_plugin(bevy_webgl2::WebGL2Plugin);
+
+    app.add_plugin(PlayerDebugPlugin);
 
     app.run();
 }

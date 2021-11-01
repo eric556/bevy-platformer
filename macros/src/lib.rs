@@ -163,7 +163,7 @@ pub fn animation_graph(input: TokenStream) -> TokenStream {
     }).collect();
 
     let expanded = quote! {
-        mod #name {
+        pub mod #name {
             #[derive(Debug)]
             pub enum #enum_ident {
                 #(#state_idents,)*

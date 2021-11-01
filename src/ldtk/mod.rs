@@ -14,11 +14,8 @@ impl AssetLoader for LdtkAssetLoader {
         load_context: &'a mut bevy::asset::LoadContext,
     ) -> bevy::asset::BoxedFuture<'a, Result<(), anyhow::Error>> {
         Box::pin(async move {
-            // let custom_asset = ron::de::from_bytes::<CustomAsset>(bytes)?;
             let custom_asset = serde_json::from_slice::<ldtk_json::Project>(bytes)?;
-            println!("asset: {:?}", custom_asset);
             load_context.set_default_asset(LoadedAsset::new(custom_asset));
-            println!("Loaded asset");
             Ok(())
         })
     }

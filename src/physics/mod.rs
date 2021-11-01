@@ -108,12 +108,13 @@ fn move_actor(
 
 fn debug_body_information(
     mut egui_ctx: ResMut<EguiContext>,
-    body_query: Query<(&Position, &Velocity, &Acceleration, &Remainder, &AABB, &BodyType)>,
+    actors_query: Query<(&Position, &Velocity, &Acceleration, &Remainder, &AABB, &BodyType)>,
+    solids_query: Query<(&Position, &Velocity, &Remainder, &AABB, &BodyType)>
 ) {
     Window::new("Bodies").scroll(true).show(egui_ctx.ctx(), |ui| {
         ui.collapsing("Actors", |ui| {
             let mut i = 0u32;
-            for (pos, vel, accel, remain, aabb, _) in body_query.iter().filter(|(_, _, _, _, _, body_type)| { return **body_type == BodyType::Actor; }) {
+            for (pos, vel, accel, remain, aabb, _) in actors_query.iter().filter(|(_, _, _, _, _, body_type)| { return **body_type == BodyType::Actor; }) {
                 ui.collapsing(format!("Actor {}", i), |ui| {
                     ui.label(format!("Position: {:?}", pos));
                     ui.label(format!("Velocity: {:?}", vel));
@@ -128,10 +129,9 @@ fn debug_body_information(
         ui.separator();
 
         ui.collapsing("Solids", |ui| {
-            for (pos, vel, accel, remain, aabb, _) in body_query.iter().filter(|(_, _, _, _, _, body_type)| { return **body_type == BodyType::Solid; }) {
+            for (pos, vel, remain, aabb, _) in solids_query.iter().filter(|(_, _, _, _, body_type)| { return **body_type == BodyType::Solid; }) {
                 ui.label(format!("Position: {:?}", pos));
                 ui.label(format!("Velocity: {:?}", vel));
-                ui.label(format!("Acceleration: {:?}", accel));
                 ui.label(format!("Remainder: {:?}", remain));
                 ui.label(format!("AABB: {:?}", aabb));
             }
@@ -161,7 +161,7 @@ impl Plugin for DebugPhysicsPlugin {
     fn build(&self, app: &mut bevy::prelude::AppBuilder) {
         #[cfg(target_arch = "x86_64")]
         app.add_system(debug_aabb.system());
-        app.add_system_to_stage(PhysicsStages::PreStep, debug_body_information.system());
+        // app.add_system_to_stage(PhysicsStages::PreStep, debug_body_information.system());
     }
 }
 
