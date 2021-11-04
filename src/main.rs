@@ -120,7 +120,7 @@ fn spawn_tile(
                 scale.0,
                 (tile.px[0] as f32 + level_world_pos.x) as i32,
                 (tile.px[1] as f32 + level_world_pos.y) as i32,
-                50,
+                500,
             ),
             rotation: flip(flip_x, flip_y),
             scale: Vec3::splat(scale.0),
@@ -205,9 +205,8 @@ fn spawn_player(
             sprite_sheet: SpriteSheetBundle {
                 texture_atlas:
                 player_animations.texture_atlas.clone(),
-                transform: Transform::from_scale(
-                    Vec3::splat(scale),
-                ).mul_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 50.0))),
+                transform:Transform::from_translation(Vec3::new(0.0, 0.0, 500.0)).mul_transform(Transform::from_scale(
+                    Vec3::splat(scale))),
                 ..Default::default()
             },
             sprite_sheet_definitions:
@@ -237,6 +236,10 @@ fn spawn_player(
         ..Default::default()
     })
     .insert(CameraTarget);
+
+    println!("{:?}", Transform::from_scale(
+        Vec3::splat(scale),
+    ).mul_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 50.0))).translation);
 }
 
 fn setup_animation_assets(
@@ -320,10 +323,10 @@ fn load_tilesets(
 
     commands.insert_resource(Backgrounds {
         bgs: vec![
-            (asset_server.load("tiles and background_foreground/bg_0.png"), 1, 0.9),
-            (asset_server.load("tiles and background_foreground/bg_1.png"), 2, 0.4),
-            (asset_server.load("tiles and background_foreground/bg_2.png"), 3, 0.2),
-            (asset_server.load("tiles and background_foreground/fg_1.png"), 51, -0.2),
+            (asset_server.load("tiles and background_foreground/bg_0.png"), 100, 0.9),
+            (asset_server.load("tiles and background_foreground/bg_1.png"), 200, 0.4),
+            (asset_server.load("tiles and background_foreground/bg_2.png"), 500, 0.2),
+            (asset_server.load("tiles and background_foreground/fg_1.png"), 501, -0.2),
         ]
     });
 }
@@ -342,7 +345,9 @@ fn update_ldtk_map(
         return;
     }
 
-    commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera);
+    let mut cam = OrthographicCameraBundle::new_2d();
+    cam.transform.translation.z = 800.0;
+    commands.spawn_bundle(cam).insert(MainCamera);
 
     for background_handle in &backgrounds.bgs {
         let mut transform = Transform::from_scale(Vec3::splat(scale.0 * 2.0));
