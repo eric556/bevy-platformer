@@ -1,48 +1,20 @@
-use bevy::prelude::*;
+use bevy::{ecs::schedule::GraphNode, prelude::*, sprite::collide_aabb::Collision};
+
+#[cfg(target_arch = "x86_64")]
 use bevy_canvas::{
     common_shapes::{self, Rectangle},
     Canvas, DrawMode,
 };
-use bevy_rapier2d::{
-    physics::{
-        ColliderBundle, QueryPipelineColliderComponentsQuery, QueryPipelineColliderComponentsSet,
-        RapierConfiguration, RigidBodyBundle,
-    },
-    prelude::{
-        ColliderPosition, ColliderShape, Cuboid, InteractionGroups, QueryPipeline, RigidBodyForces,
-        RigidBodyMassProps, RigidBodyVelocity,
-    },
-};
 
-use crate::{GROUND_GROUP, SHAPE_CAST_GROUP, animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}};
+use bevy_egui::{EguiContext, egui::{self, Window}};
+
+use crate::{animation::{AnimatedSpriteBundle, Col, Row, SpriteSheetDefinition}, physics::{PhysicsStages, StepSystemLabels, body::{Acceleration, BodyBundle, Velocity}, collision::{AABB, CollisionResult}}};
 use macros::animation_graph;
 
-animation_graph!(
-    Player,
-    {vel: bevy_rapier2d::rapier::dynamics::RigidBodyVelocity},
-    Jump {
-		Fall -> vel.linvel.y < 0.0
-	},
-	Fall {
-		Idle -> vel.linvel.y == 0.0
-	},
-	Idle {
-		Jump -> vel.linvel.y != 0.0 && vel.linvel.y > 0.0,
-		Fall -> vel.linvel.y != 0.0 && vel.linvel.y < 0.0,
-		Run ->  vel.linvel.x != 0.0
-	},
-	Run {
-		Jump -> vel.linvel.y != 0.0 && vel.linvel.y > 0.0,
-		Fall -> vel.linvel.y != 0.0 && vel.linvel.y < 0.0,
-		Idle -> vel.linvel.x == 0.0
-	}
-);
+pub mod player_animation;
+pub mod player_physics;
 
-impl Default for Player::PlayerAnimationUpdate {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
+use self::{player_animation::{update_player_animation, Player::{PlayerAnimationUpdate, player_animation_update}}, player_physics::{PlayerJumpParams, PlayerWalkParams, collision_check, gravity, integrate_movement}};
 
 #[derive(Default)]
 pub struct Health(pub u32);
@@ -65,162 +37,120 @@ impl Default for PlayerInput {
     }
 }
 
-#[derive(Default)]
-pub struct PlayerState {
-    pub grounded: bool,
-}
-
-#[derive(Default)]
-pub struct PlayerStats {
-    pub max_run_speed: f32,
-    pub speed_up: f32,
-}
-
 #[derive(Bundle, Default)]
 pub struct PlayerBundle {
     pub health: Health,
     #[bundle]
-    pub rigid_body: RigidBodyBundle,
-    #[bundle]
-    pub collider: ColliderBundle,
+    pub body_bundle: BodyBundle,
+    pub collider: AABB,
     #[bundle]
     pub animation: AnimatedSpriteBundle,
     pub input: PlayerInput,
-    pub state: PlayerState,
-    pub action: Player::PlayerAnimationUpdate,
-    pub player_stats: PlayerStats,
+    pub action: PlayerAnimationUpdate,
+    pub player_walk_params: PlayerWalkParams,
+    pub player_jump_params: PlayerJumpParams,
+    pub acceleration: Acceleration
 }
 
-fn update_player_animation(
-    mut player_query: Query<
-        (
-            &Player::PlayerAnimationUpdate,
-            &SpriteSheetDefinition,
-            &mut Timer,
-            &mut Row,
-            &mut Col
-        ),
-        Changed<Player::PlayerAnimationUpdate>,
-    >,
-) {
-    for (player_action, sprite_sheet_def, mut timer, mut row, mut col) in player_query.iter_mut()
-    {
-        row.0 = match player_action {
-            Player::PlayerAnimationUpdate::Idle => 5,
-            Player::PlayerAnimationUpdate::Run => 1,
-            Player::PlayerAnimationUpdate::Fall => 6,
-            Player::PlayerAnimationUpdate::Jump => 7,
-            _ => todo!("Implement rest of player state animations"),
-        };
 
-        // reset the timer
-        let def = &sprite_sheet_def.animation_definitions[row.0];
-        *timer = Timer::from_seconds(def.frame_time, def.repeating);
-
-        // reset to begining of animation
-        col.0 = 0;
-    }
-}
-
-fn update_player_grounded(
-    query_pipeline: Res<QueryPipeline>,
-    collider_query: QueryPipelineColliderComponentsQuery,
-    rapier_params: Res<RapierConfiguration>,
-    mut canvas: ResMut<Canvas>,
-    mut player_query: Query<(&ColliderPosition, &ColliderShape, &mut PlayerState)>,
-) {
-    let collider_set = QueryPipelineColliderComponentsSet(&collider_query);
-
-    for (col_pos, col_shape, mut state) in player_query.iter_mut() {
-        let bounds = col_shape.compute_aabb(&col_pos.0);
-        let bounds_half_extents: Vec2 = bounds.half_extents().into();
-        let collider_position = Vec2::from(col_pos.translation);
-        // same width, half the hight of the bounding boxs
-        let shape_down_up_width_adjust = 0.1 * bounds_half_extents.x;
-        let shape_down_up = Cuboid::new(
-            Vec2::new(
-                bounds_half_extents.x - shape_down_up_width_adjust,
-                bounds_half_extents.y / 4.0,
-            )
-            .into(),
-        );
-        let shape_down_pos = [
-            collider_position.x,
-            collider_position.y - (bounds_half_extents.y),
-        ]
-        .into();
-        let shape_vel = Vec2::new(0.0, -0.01).into();
-        let max_toi = 4.0;
-        let groups = InteractionGroups::new(SHAPE_CAST_GROUP, GROUND_GROUP);
-        let filter = None;
-
-        if let Some((handle, hit)) = query_pipeline.cast_shape(
-            &collider_set,
-            &shape_down_pos,
-            &shape_vel,
-            &shape_down_up,
-            max_toi,
-            groups,
-            filter,
-        ) {
-            // The first collider hit has the handle `handle`. The `hit` is a
-            // structure containing details about the hit configuration.
-            // println!("Hit the entity with the configuration: {:?}", hit);
-            state.grounded = true;
-        } else {
-            state.grounded = false;
-        }
-
-        canvas.draw(
-            &Rectangle {
-                origin: Vec2::from(shape_down_pos.translation) * rapier_params.scale,
-                extents: Vec2::from(shape_down_up.half_extents) * rapier_params.scale * 2.0,
-                anchor_point: common_shapes::RectangleAnchor::Center,
-            },
-            DrawMode::stroke_1px(),
-            Color::BLUE,
-        );
-    }
-}
 
 fn move_player(
+    time: Res<Time>,
     keys: Res<Input<KeyCode>>,
     mut player_query: Query<(
         &PlayerInput,
-        &PlayerStats,
-        &PlayerState,
-        &mut RigidBodyVelocity
+        &PlayerWalkParams,
+        &mut PlayerJumpParams,
+        &mut Velocity,
+        &mut Acceleration
     )>,
 ) {
-    for (p_input, player_stats, state, mut vel) in
+    for (p_input, player_walk_params, mut player_jump_params, mut vel, mut accel) in
         player_query.iter_mut()
     {
-        let prev_vel_sign = vel.linvel.x.signum();
+        if vel.0.y != 0.0 {
+            player_jump_params.grounded = false;
+        }
 
         if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right))
             || (keys.pressed(p_input.left) && keys.pressed(p_input.right))
         {
-            vel.linvel.x = 0.0;
+            vel.0.x = 0.0;
         } else if keys.pressed(p_input.left) {
-            if prev_vel_sign > 0.0 {
-                vel.linvel.x = 0.0;
-            }
-            vel.linvel.x -= player_stats.speed_up;
-            vel.linvel.x = vel.linvel.x.max(-player_stats.max_run_speed);
+            accel.0.x += -player_walk_params.walk_accel;
         } else if keys.pressed(p_input.right) {
-            if prev_vel_sign < 0.0 {
-                vel.linvel.x = 0.0;
-            }
-            vel.linvel.x += player_stats.speed_up;
-            vel.linvel.x = vel.linvel.x.min(player_stats.max_run_speed);
+            accel.0.x += player_walk_params.walk_accel;
         }
 
-        if keys.pressed(p_input.jump) && state.grounded {
-            if vel.linvel.y < 40.0 {
-                vel.linvel.y += 5.0;
-            }
-            // vel.apply_impulse(mass, Vec2::new(0.0, 10.0).into());
+        if player_jump_params.grounded && keys.just_pressed(p_input.jump) {
+            player_jump_params.is_jumping = true;
+            player_jump_params.grounded = false;
+            player_jump_params.jump_timer = Timer::from_seconds(player_jump_params.max_jump_duration, false);
         }
+
+        if keys.pressed(p_input.jump) && player_jump_params.is_jumping {
+            if !player_jump_params.jump_timer.finished() {
+                accel.0.y += player_jump_params.jump_acceleration;
+                player_jump_params.jump_timer.tick(time.delta());
+            } else {
+                player_jump_params.is_jumping = false;
+            }
+        }
+
+        if keys.just_released(p_input.jump) {
+            player_jump_params.is_jumping = false;
+        }
+    }
+}
+
+fn debug_player_params(
+    mut egui_ctx: ResMut<EguiContext>,
+    mut player_params_query: Query<(&mut PlayerJumpParams, &mut PlayerWalkParams)>,
+) {
+    Window::new("Bodies").scroll(true).show(egui_ctx.ctx(), |ui| {
+        let mut i = 0u32;
+        for (mut jump_params, mut walk_params) in player_params_query.iter_mut() {
+            ui.collapsing(format!("Player {}", i), |ui| {
+                egui::Grid::new(format!("Player {} prams", i)).show(ui, |ui|{
+                    ui.label("Walk Accel");
+                    ui.add_sized([40.0, 20.0], egui::DragValue::new(&mut walk_params.walk_accel));
+                    ui.end_row();
+                    ui.label("Max Walk Speed");
+                    ui.add_sized([40.0, 20.0], egui::DragValue::new(&mut walk_params.max_walk_speed));
+                    ui.end_row();
+                    ui.separator();
+                    ui.end_row();
+                    ui.label("Gravity");
+                    ui.add_sized([40.0, 20.0], egui::DragValue::new(&mut jump_params.gravity.x));
+                    ui.add_sized([40.0, 20.0], egui::DragValue::new(&mut jump_params.gravity.y));
+                    ui.end_row();
+                    ui.label("Jump Acceleration");
+                    ui.add_sized([40.0, 20.0], egui::DragValue::new(&mut jump_params.jump_acceleration));
+                    ui.end_row();
+                    ui.label("Max Jump Duration");
+                    ui.add_sized([40.0, 20.0], egui::DragValue::new(&mut jump_params.max_jump_duration));
+                    ui.end_row();
+                    ui.label("Max Fall Speed");
+                    ui.add_sized([40.0, 20.0], egui::DragValue::new(&mut jump_params.max_fall_speed));
+                    ui.end_row();
+                    ui.checkbox(&mut jump_params.grounded, "Grounded");
+                    ui.end_row();
+                    ui.checkbox(&mut jump_params.is_jumping, "Is Jumping");
+                    ui.end_row();
+
+                });
+            });
+            ui.separator();
+            i += 1;
+        }
+    });
+}
+
+pub struct PlayerDebugPlugin;
+
+impl Plugin for PlayerDebugPlugin {
+    fn build(&self, app: &mut AppBuilder) {
+        app.add_system(debug_player_params.system());
     }
 }
 
@@ -228,10 +158,13 @@ pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut AppBuilder) {
-        app.add_system(move_player.system())
-            .add_system(update_player_animation.system())
-            .add_system(update_player_grounded.system())
-            // .add_system(update_player_action.system());
-            .add_system(Player::player_animation_update.system());
+        app
+            .add_system_to_stage(PhysicsStages::PreStep, move_player.system().label("MOVE_PLAYER"))
+            .add_system_to_stage(PhysicsStages::PreStep, gravity.system().after("MOVE_PLAYER"))
+            .add_system_to_stage(PhysicsStages::Step, integrate_movement.system().label("INTEGRATE_PLAYER").before(StepSystemLabels::MoveActors))
+            .add_system_to_stage(PhysicsStages::PostStep, collision_check.system().label("COLLISION_CHECK"))
+
+            .add_system(update_player_animation.system().after("player_animation_update"))
+            .add_system(player_animation_update.system().label("player_animation_update"));
     }
 }

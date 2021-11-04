@@ -54,6 +54,7 @@ impl Parse for State {
 
 struct AnimationGraph {
     name: Ident,
+    resources: Vec<ExprType>,
     params: Vec<ExprType>,
     states: Vec<State>
 }
@@ -62,14 +63,19 @@ impl Parse for AnimationGraph {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let name: Ident = input.parse()?;
         input.parse::<Token![,]>()?;
-        let content;
-        let _ = braced!(content in input);
-        let params: Vec<ExprType> = (Punctuated::<ExprType, Token![,]>::parse_terminated(&content)?).into_iter().collect();
+        let resources_content;
+        let _ = braced!(resources_content in input);
+        let resources: Vec<ExprType> = (Punctuated::<ExprType, Token![,]>::parse_terminated(&resources_content)?).into_iter().collect();
+        input.parse::<Token![,]>()?;
+        let params_content;
+        let _ = braced!(params_content in input);
+        let params: Vec<ExprType> = (Punctuated::<ExprType, Token![,]>::parse_terminated(&params_content)?).into_iter().collect();
         input.parse::<Token![,]>()?;
         let states: Vec<State> = (Punctuated::<State, Token![,]>::parse_terminated(&input)?).into_iter().collect();
 
         Ok(AnimationGraph {
             name,
+            resources,
             params,
             states,
         })
@@ -79,7 +85,8 @@ impl Parse for AnimationGraph {
 #[proc_macro]
 pub fn animation_graph(input: TokenStream) -> TokenStream {
     let AnimationGraph { 
-        name, 
+        name,
+        resources,
         params, 
         states 
     } = parse_macro_input!(input as AnimationGraph);
@@ -97,6 +104,21 @@ pub fn animation_graph(input: TokenStream) -> TokenStream {
             path.path.segments[0].ident.clone()
         } else {
             (*param.expr).span().unwrap().error("Expected ident here");
+            panic!("Expected ident");
+        };
+
+        temp
+    }).collect();
+
+    let resource_types: Vec<Type> = resources.clone().into_iter().map(|resource| {
+        *resource.ty
+    }).collect();
+
+    let resource_names: Vec<Ident> = resources.clone().into_iter().map(|resource| {
+        let temp = if let Expr::Path(path) = *resource.expr {
+            path.path.segments[0].ident.clone()
+        } else {
+            (*resource.expr).span().unwrap().error("Expected ident here");
             panic!("Expected ident");
         };
 
@@ -141,15 +163,20 @@ pub fn animation_graph(input: TokenStream) -> TokenStream {
     }).collect();
 
     let expanded = quote! {
-        mod #name {
+        pub mod #name {
+            #[derive(Debug)]
             pub enum #enum_ident {
                 #(#state_idents,)*
             }
 
             pub fn #system_ident (
+                #(#resource_names: #resource_types,)*
                 mut #query_ident: bevy::ecs::system::Query<(&mut #enum_ident, #(&#param_types,)*)>
             ) {
+                let mut i = 0;
                 for (mut #enum_query_for_ident, #(#param_names,)*) in #query_ident.iter_mut() {
+                    // println!("vel here {:?} {}", vel, i);
+                    i = i + 1;
                     match *#enum_query_for_ident {
                         #(#states_match_statment)*
                     }
