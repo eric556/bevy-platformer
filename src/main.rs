@@ -5,6 +5,7 @@ use animation::{AnimationPlugin, Col, Row, SpriteSheetDefinition};
 use bevy::{math::Vec3Swizzles, prelude::*, reflect::GetPath};
 use bevy_egui::EguiPlugin;
 use bevy_mod_debugdump::schedule_graph::schedule_graph_dot;
+use camera::parallax::ParallaxLayer;
 use fastapprox::fast::ln;
 use ldtk::ldtk_json::{Project, TileInstance};
 use physics::{DebugPhysicsPlugin, PhysicsPlugin, body::{Velocity}};
@@ -54,6 +55,10 @@ pub struct PlayerAnimationsAssets {
     pub texture_atlas: Handle<TextureAtlas>,
     pub animation_definitions: Vec<AnimationDefinition>
 } 
+
+pub struct Backgrounds {
+    pub bgs: Vec<(Handle<Texture>, i32, f32)>
+}
 
 // LDtk provides pixel locations starting in the top left. For Bevy we need to
 // flip the Y axis and offset from the center of the screen.
@@ -115,7 +120,7 @@ fn spawn_tile(
                 scale.0,
                 (tile.px[0] as f32 + level_world_pos.x) as i32,
                 (tile.px[1] as f32 + level_world_pos.y) as i32,
-                layer_info.z_index,
+                50,
             ),
             rotation: flip(flip_x, flip_y),
             scale: Vec3::splat(scale.0),
@@ -180,6 +185,7 @@ fn spawn_player(
     half_extents: Vec2,
     scale: f32
 ) {
+
     commands
     .spawn_bundle(PlayerBundle {
         health: Health(10u32),
@@ -201,7 +207,7 @@ fn spawn_player(
                 player_animations.texture_atlas.clone(),
                 transform: Transform::from_scale(
                     Vec3::splat(scale),
-                ),
+                ).mul_transform(Transform::from_translation(Vec3::new(0.0, 0.0, 50.0))),
                 ..Default::default()
             },
             sprite_sheet_definitions:
@@ -222,8 +228,8 @@ fn spawn_player(
         },
         player_jump_params: PlayerJumpParams {
             gravity: Vec2::new(0f32, -3000f32),
-            jump_acceleration: 7000f32,
-            max_jump_duration: 0.2f32,
+            jump_acceleration: 100f32,
+            max_jump_duration: 0.25f32,
             max_fall_speed: -700f32,
             jump_timer: Timer::from_seconds(0.2, false),
             ..Default::default()
@@ -309,24 +315,47 @@ fn load_tilesets(
         }
 
         commands.insert_resource(map_assets);
-        state.set(AppState::InGame);
+        let _ = state.set(AppState::InGame);
     }
 
+    commands.insert_resource(Backgrounds {
+        bgs: vec![
+            (asset_server.load("tiles and background_foreground/bg_0.png"), 1, 0.9),
+            (asset_server.load("tiles and background_foreground/bg_1.png"), 2, 0.4),
+            (asset_server.load("tiles and background_foreground/bg_2.png"), 3, 0.2),
+            (asset_server.load("tiles and background_foreground/fg_1.png"), 51, -0.2),
+        ]
+    });
 }
 
 fn update_ldtk_map(
     mut commands: Commands,
     mut map: ResMut<Map>,
+    backgrounds: Res<Backgrounds>,
     map_assets: Res<LdtkMapAssets>,
-    ldtk_maps: Res<Assets<Project>>,
+    player_animations: Res<PlayerAnimationsAssets>,
     scale: Res<Scale>,
-    player_animations: Res<PlayerAnimationsAssets>
+    ldtk_maps: Res<Assets<Project>>,
+    mut materials: ResMut<Assets<ColorMaterial>>
 ) {
     if !map.redraw {
         return;
     }
 
     commands.spawn_bundle(OrthographicCameraBundle::new_2d()).insert(MainCamera);
+
+    for background_handle in &backgrounds.bgs {
+        let mut transform = Transform::from_scale(Vec3::splat(scale.0 * 2.0));
+        transform.translation.z = background_handle.1 as f32;
+        commands.spawn_bundle(SpriteBundle {
+            material: materials.add(background_handle.0.clone_weak().into()),
+            transform: transform,
+            ..Default::default()
+        }).insert(ParallaxLayer {
+            parallax_factor: background_handle.2,
+            ..Default::default()
+        });
+    }
 
     if let Some(ldtk_file) = ldtk_maps.get(&map.ldtk_file) {
         commands.insert_resource(ClearColor(

@@ -1,6 +1,10 @@
 use bevy::{math::{Vec2, Vec3, Vec3Swizzles}, prelude::{IntoSystem, Plugin, Query, Transform, With, Without}};
 use fastapprox::fast::ln;
 
+use self::parallax::{move_parallax, parallax_start};
+
+pub mod parallax;
+
 pub struct MainCamera;
 pub struct CameraTarget;
 
@@ -45,6 +49,8 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut bevy::prelude::AppBuilder) {
+        app.add_startup_system(parallax_start.system());
+        app.add_system(move_parallax.system());
         app.add_system(move_camera.system());
     }
 }

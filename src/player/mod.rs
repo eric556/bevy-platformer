@@ -68,14 +68,18 @@ fn move_player(
     for (p_input, player_walk_params, mut player_jump_params, mut vel, mut accel) in
         player_query.iter_mut()
     {
+        if vel.0.y != 0.0 {
+            player_jump_params.grounded = false;
+        }
+
         if (!keys.pressed(p_input.left) && !keys.pressed(p_input.right))
             || (keys.pressed(p_input.left) && keys.pressed(p_input.right))
         {
             vel.0.x = 0.0;
         } else if keys.pressed(p_input.left) {
-            accel.0.x += -player_walk_params.walk_accel;
+            vel.0.x += -player_walk_params.walk_accel;
         } else if keys.pressed(p_input.right) {
-            accel.0.x += player_walk_params.walk_accel;
+            vel.0.x += player_walk_params.walk_accel;
         }
 
         if player_jump_params.grounded && keys.just_pressed(p_input.jump) {
@@ -86,7 +90,7 @@ fn move_player(
 
         if keys.pressed(p_input.jump) && player_jump_params.is_jumping {
             if !player_jump_params.jump_timer.finished() {
-                accel.0.y += player_jump_params.jump_acceleration;
+                vel.0.y += player_jump_params.jump_acceleration;
                 player_jump_params.jump_timer.tick(time.delta());
             } else {
                 player_jump_params.is_jumping = false;
