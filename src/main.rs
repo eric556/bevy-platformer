@@ -221,13 +221,13 @@ fn spawn_player(
             current_col: Col(0),
         },
         player_walk_params: PlayerWalkParams {
-            walk_accel: 6000f32,
+            walk_accel: 700f32,
             max_walk_speed: 700f32,
             ..Default::default()
         },
         player_jump_params: PlayerJumpParams {
             gravity: Vec2::new(0f32, -3000f32),
-            jump_acceleration: 7000f32,
+            jump_acceleration: 100f32,
             max_jump_duration: 0.2f32,
             max_fall_speed: -700f32,
             jump_timer: Timer::from_seconds(0.2, false),

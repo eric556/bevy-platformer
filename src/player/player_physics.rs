@@ -24,11 +24,7 @@ pub fn integrate_movement(
 ) {
     for (mut velocity, mut acceleration, player_walk_params, player_jump_params) in body_query.iter_mut() {
         let added_velocity = acceleration.0 * time.delta_seconds();
-        let temp_velocity = if velocity.0.x.signum() == added_velocity.x.signum() || added_velocity.x == 0.0f32 {
-            added_velocity + velocity.0
-        } else {
-            Vec2::new(added_velocity.x, added_velocity.y + velocity.0.y)
-        };
+        let temp_velocity = added_velocity + velocity.0;
 
         // Clamp the player speed
         velocity.0 = Vec2::new(

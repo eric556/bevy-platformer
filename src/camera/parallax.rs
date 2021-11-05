@@ -59,7 +59,7 @@ pub fn move_parallax(
                         // let new_pos = layer.start_position.xy() + travel * parallax_factor;
                         let new_pos = Vec2::new(layer.start_position.x + travel.x * parallax_factor, layer.start_position.y);
                         layer_transform.translation.x = new_pos.x;
-                        layer_transform.translation.y = new_pos.y;
+                        // layer_transform.translation.y = new_pos.y;
                         i += 1;
                     }
                 });
